@@ -1,0 +1,65 @@
+﻿@page "/login"
+@using MudBlazor
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<PageTitle>Sign in - Desk</PageTitle>
+
+<div class="auth-wrap">
+    <div class="auth-box">
+        <div class="auth-logo">Support<span>Desk</span></div>
+        <div class="auth-title">Sign in</div>
+        <div class="auth-sub">Enter your credentials to continue</div>
+
+        <div class="field">
+            <label>Email</label>
+            <MudTextField @bind-Value="_email" Variant="Variant.Outlined" InputType="InputType.Email"
+                          FullWidth="true" Placeholder="you@example.com" />
+        </div>
+
+        <div class="field">
+            <label>Password</label>
+            <MudTextField @bind-Value="_password" Variant="Variant.Outlined"
+                          InputType="@(_show ? InputType.Text : InputType.Password)"
+                          FullWidth="true" Placeholder="••••••••"
+                          Adornment="Adornment.End"
+                          AdornmentIcon="@(_show ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                          OnAdornmentClick="() => _show = !_show" />
+        </div>
+
+        <button class="btn btn-primary" style="width:100%; justify-content:center; padding:10px;"
+                @onclick="HandleLogin" disabled="@_loading">
+            @if (_loading) { <span>Signing in…</span> } else { <span>Sign in</span> }
+        </button>
+
+        <p style="text-align:center; margin-top:18px; font-size:12.5px; color:var(--text-2);">
+            No account? <a href="/register" style="color:var(--accent-text); text-decoration:none;">Register</a>
+        </p>
+    </div>
+</div>
+
+@code {
+    private string _email = "", _password = "";
+    private bool _show, _loading;
+
+    protected override void OnInitialized()
+    {
+        if (AuthService.IsAuthenticated) Navigation.NavigateTo("/");
+    }
+
+    private async Task HandleLogin()
+    {
+        if (string.IsNullOrWhiteSpace(_email) || string.IsNullOrWhiteSpace(_password))
+        { Snackbar.Add("Fill in all fields.", Severity.Warning); return; }
+        _loading = true;
+        var ok = await AuthService.LoginAsync(_email, _password, JS);
+        _loading = false;
+        if (ok) Navigation.NavigateTo("/");
+        else Snackbar.Add("Invalid email or password.", Severity.Error);
+    }
+}
+
+

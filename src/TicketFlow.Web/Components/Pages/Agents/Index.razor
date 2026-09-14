@@ -1,0 +1,150 @@
+@page "/agents"
+@using MudBlazor
+@using TicketFlow.Shared.DTOs
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+
+
+<PageTitle>Agents - Desk</PageTitle>
+
+<div class="page-header">
+    <div><h1>Agents</h1><p>@_totalCount agents</p></div>
+    @if (AuthService.IsManager || AuthService.HasPermission("Agents.Manage"))
+    {
+        <button class="btn btn-primary" @onclick="() => _showAdd = true">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add agent
+        </button>
+    }
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+}
+else if (!_agents.Any())
+{
+    <div class="card"><div class="empty-state"><p>No agents yet.</p></div></div>
+}
+else
+{
+    <div class="scroll-body">
+        <div class="agent-grid">
+            @foreach (var a in _agents)
+            {
+                <div class="agent-card">
+                    <div class="agent-name">@a.FullName</div>
+                    <div class="agent-email">@a.Email</div>
+                    <div class="agent-footer">
+                        <div>
+                            <span class="avail-badge @(a.IsAvailable ? "avail-yes" : "avail-no")">
+                                @(a.IsAvailable ? "Available" : "Busy")
+                            </span>
+                            <span class="text-3 mono" style="font-size:11px; margin-left:8px;">
+                                @a.AssignedTicketCount ticket@(a.AssignedTicketCount == 1 ? "" : "s")
+                            </span>
+                        </div>
+                        <MudSwitch Value="@a.IsAvailable"
+                                   ValueChanged="@((bool v) => ToggleAvail(a, v))"
+                                   Color="Color.Success" Style="margin:0;" />
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (_totalPages > 1)
+    {
+        <div class="pagination-row">
+            <MudPagination Count="@_totalPages" Selected="_page" SelectedChanged="OnPageChanged" Color="Color.Primary"
+                           ShowFirstButton="true" ShowLastButton="true" />
+        </div>
+    }
+}
+
+@if (_showAdd)
+{
+    <div class="dialog-overlay" @onclick="() => _showAdd = false">
+        <div class="dialog-box" @onclick:stopPropagation="true">
+            <div class="dialog-title">Add agent</div>
+            <div class="field">
+                <label>Full name</label>
+                <input class="input" type="text" @bind="_newName" placeholder="Jane Smith" />
+            </div>
+            <div class="field">
+                <label>Email</label>
+                <input class="input" type="email" @bind="_newEmail" placeholder="jane@company.com" />
+            </div>
+            <div class="dialog-actions">
+                <button class="btn btn-ghost" @onclick="() => _showAdd = false">Cancel</button>
+                <button class="btn btn-primary" @onclick="AddAgent" disabled="@_addBusy">
+                    @(_addBusy ? "Adding…" : "Add agent")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<AgentDto> _agents = [];
+    private bool _loading = true, _showAdd, _addBusy;
+    private string _newName = "", _newEmail = "";
+    private int _page = 1;
+    private int _totalPages = 1;
+    private int _totalCount;
+    private const int PageSize = 12;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthService.IsAuthenticated || (!AuthService.IsManager && !AuthService.IsAgent && !AuthService.HasPermission("Agents.Manage")))
+        { Navigation.NavigateTo("/"); return; }
+        await LoadPage();
+    }
+
+    private async Task LoadPage()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        var result = await ApiService.GetAgentsPagedAsync(_page, PageSize);
+        _agents = result?.Items ?? [];
+        _totalCount = result?.TotalCount ?? 0;
+        _totalPages = Math.Max(1, result?.TotalPages ?? 1);
+
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task OnPageChanged(int page)
+    {
+        _page = page;
+        await LoadPage();
+    }
+
+    private async Task ToggleAvail(AgentDto a, bool v)
+    {
+        await ApiService.SetAgentAvailabilityAsync(a.Id, v);
+        a.IsAvailable = v;
+    }
+
+    private async Task AddAgent()
+    {
+        if (string.IsNullOrWhiteSpace(_newName) || string.IsNullOrWhiteSpace(_newEmail)) return;
+        _addBusy = true;
+        var r = await ApiService.CreateAgentAsync(new CreateAgentDto { FullName = _newName, Email = _newEmail });
+        _addBusy = false;
+        if (r is not null)
+        {
+            _showAdd = false;
+            _newName = ""; _newEmail = "";
+            Snackbar.Add("Agent added.", Severity.Success);
+            await LoadPage();
+        }
+        else Snackbar.Add("Failed : email may already exist.", Severity.Error);
+    }
+}

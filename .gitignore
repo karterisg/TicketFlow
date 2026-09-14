@@ -1,0 +1,30 @@
+# Build results
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.user
+!*.slnLaunch.user
+*.suo
+
+# Rider
+.idea/
+
+# OS
+.DS_Store
+
+# Local secrets / environment
+secrets
+*.env
+.env
+appsettings.*.local.json
+
+# Claude Code local settings (can contain machine-specific creds in permission entries)
+**/.claude/settings.local.json
+
+# Logs
+*.log
+Logs/
+logs/

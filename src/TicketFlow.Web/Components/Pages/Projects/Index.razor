@@ -1,0 +1,229 @@
+@page "/projects"
+@using MudBlazor
+@using TicketFlow.Shared.DTOs
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>Projects — Desk</PageTitle>
+
+<div class="page-header">
+    <div><h1>@(AuthService.IsManager ? "Projects" : "My Projects")</h1><p>@_totalCount projects</p></div>
+    @if (AuthService.IsManager)
+    {
+        <div style="display:flex; gap:8px;">
+            <a href="/project-categories" class="btn btn-ghost btn-sm">Categories</a>
+            <a href="/project-templates" class="btn btn-ghost btn-sm">Templates</a>
+            <button class="btn btn-primary" @onclick="() => _showAdd = true">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                New project
+            </button>
+        </div>
+    }
+</div>
+
+<div class="filter-bar">
+    <input class="search-input" type="text" placeholder="Search projects…"
+           value="@_search" @oninput="OnSearchInput" />
+</div>
+
+<div class="card" style="overflow:hidden;">
+    <MudDataGrid @ref="_grid" T="ProjectDto" ServerData="ServerReload" Loading="_loading"
+                 Hover="true" Dense="true" RowsPerPage="15" Height="calc(79vh - 260px)" FixedHeader="true">
+        <Columns>
+            <PropertyColumn Property="x => x.Name" Title="Name">
+                <CellTemplate>
+                    @context.Item.IconKey &nbsp; @context.Item.Name
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.ProjectCategoryName" Title="Category">
+                <CellTemplate>
+                    <span class="text-2">@(context.Item.ProjectCategoryName ?? "—")</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.Status" Title="Status">
+                <CellTemplate>
+                    <span class="badge @(context.Item.Status == "Archived" ? "badge-closed" : "badge-open")">@context.Item.Status</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.MemberCount" Title="Members">
+                <CellTemplate>
+                    <span class="text-2 mono">@context.Item.MemberCount</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.Id" Title="">
+                <CellTemplate>
+                    <div style="text-align:right;">
+                        <a href="/projects/@context.Item.Id" class="btn btn-ghost btn-sm">@(AuthService.IsManager ? "Manage" : "View")</a>
+                        @if (AuthService.IsManager)
+                        {
+                            @if (context.Item.Status != "Archived")
+                            {
+                                <button class="btn btn-ghost btn-sm" @onclick="() => Archive(context.Item)">Archive</button>
+                            }
+                            <button class="btn btn-danger btn-sm" @onclick="() => Delete(context.Item)">Delete</button>
+                        }
+                    </div>
+                </CellTemplate>
+            </PropertyColumn>
+        </Columns>
+        <NoRecordsContent>
+            <div class="empty-state">
+                <p>No projects match your search.</p>
+            </div>
+        </NoRecordsContent>
+        <PagerContent>
+            <MudDataGridPager T="ProjectDto" />
+        </PagerContent>
+    </MudDataGrid>
+</div>
+
+@if (_showAdd)
+{
+    <div class="dialog-overlay" @onclick="() => _showAdd = false">
+        <div class="dialog-box" @onclick:stopPropagation="true">
+            <div class="dialog-title">New project</div>
+            <div class="field">
+                <label>Name</label>
+                <input class="input" type="text" @bind="_newName" placeholder="e.g. Website Revamp" />
+            </div>
+            <div class="field">
+                <label>Description</label>
+                <input class="input" type="text" @bind="_newDescription" placeholder="Optional" />
+            </div>
+            <div class="field">
+                <label>Category</label>
+                <select class="input" @bind="_newCategoryId">
+                    <option value="">— none —</option>
+                    @foreach (var c in _categories)
+                    {
+                        <option value="@c.Id">@c.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="field">
+                <label>Team</label>
+                <select class="input" @bind="_newTeamId">
+                    <option value="">— none —</option>
+                    @foreach (var t in _teams)
+                    {
+                        <option value="@t.Id">@t.Name</option>
+                    }
+                </select>
+                <span class="text-3" style="font-size:11px;">Members of the selected team are automatically added to the project.</span>
+            </div>
+            <div class="dialog-actions">
+                <button class="btn btn-ghost" @onclick="() => _showAdd = false">Cancel</button>
+                <button class="btn btn-primary" @onclick="Add" disabled="@_busy">Add</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private MudDataGrid<ProjectDto> _grid = default!;
+    private List<ProjectCategoryDto> _categories = [];
+    private List<TeamDto> _teams = [];
+    private bool _loading = true, _showAdd, _busy;
+    private string _newName = "", _newDescription = "", _newCategoryId = "", _newTeamId = "";
+    private string _search = "";
+    private int _totalCount;
+    private CancellationTokenSource? _debounceCts;
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        _search = e.Value?.ToString() ?? "";
+
+        _debounceCts?.Cancel();
+        _debounceCts = new CancellationTokenSource();
+        var token = _debounceCts.Token;
+        _ = DebounceReload(token);
+    }
+
+    private async Task DebounceReload(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(400, token);
+            if (token.IsCancellationRequested) return;
+            _grid.NavigateTo(Page.First);
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthService.IsAuthenticated) { Navigation.NavigateTo("/"); return; }
+
+        if (AuthService.IsManager)
+        {
+            _categories = await ApiService.GetProjectCategoriesAsync();
+            _teams = await ApiService.GetTeamsAsync();
+        }
+
+        await _grid.ReloadServerData();
+    }
+
+    private async Task<GridData<ProjectDto>> ServerReload(GridState<ProjectDto> state)
+    {
+        var result = AuthService.IsManager
+            ? await ApiService.GetProjectsPagedAsync(state.Page + 1, state.PageSize, _search)
+            : AuthService.IsAgent
+                ? await ApiService.GetProjectsPagedAsync(state.Page + 1, state.PageSize, _search, forAgentId: AuthService.AgentId)
+                : await ApiService.GetProjectsPagedAsync(state.Page + 1, state.PageSize, _search, forUserId: AuthService.UserId);
+
+        _loading = false;
+        _totalCount = result?.TotalCount ?? 0;
+        return new GridData<ProjectDto> { TotalItems = result?.TotalCount ?? 0, Items = result?.Items ?? [] };
+    }
+
+    private async Task Add()
+    {
+        if (string.IsNullOrWhiteSpace(_newName)) { Snackbar.Add("Name is required.", Severity.Warning); return; }
+        if (AuthService.UserId is null) { Snackbar.Add("Your account has no linked user profile. Please log out and back in.", Severity.Error); return; }
+        _busy = true;
+
+        var dto = new CreateProjectDto
+        {
+            Name = _newName,
+            Description = string.IsNullOrWhiteSpace(_newDescription) ? null : _newDescription,
+            OwnerUserId = AuthService.UserId.Value,
+            ProjectCategoryId = int.TryParse(_newCategoryId, out var catId) ? catId : null,
+            TeamId = int.TryParse(_newTeamId, out var teamId) ? teamId : null
+        };
+
+        var r = await ApiService.CreateProjectAsync(dto);
+        _busy = false;
+
+        if (r is not null)
+        {
+            _showAdd = false;
+            _newName = ""; _newDescription = ""; _newCategoryId = ""; _newTeamId = "";
+            Snackbar.Add("Project created.", Severity.Success);
+            await _grid.ReloadServerData();
+        }
+        else
+        {
+            Snackbar.Add("Failed to create project.", Severity.Error);
+        }
+    }
+
+    private async Task Archive(ProjectDto p)
+    {
+        if (AuthService.UserId is null) return;
+        var ok = await ApiService.ArchiveProjectAsync(p.Id, AuthService.UserId.Value);
+        if (ok) { Snackbar.Add("Project archived.", Severity.Success); await _grid.ReloadServerData(); }
+        else Snackbar.Add("Failed to archive project.", Severity.Error);
+    }
+
+    private async Task Delete(ProjectDto p)
+    {
+        if (AuthService.UserId is null) return;
+        var ok = await ApiService.DeleteProjectAsync(p.Id, AuthService.UserId.Value);
+        if (ok) { Snackbar.Add("Project deleted.", Severity.Success); await _grid.ReloadServerData(); }
+        else Snackbar.Add("Cannot delete — project has active tickets.", Severity.Error);
+    }
+}

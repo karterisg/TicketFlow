@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TicketFlow.API/TicketFlow.API.csproj" />
+    <Project Path="src/TicketFlow.Shared/TicketFlow.Shared.csproj" />
+    <Project Path="src/TicketFlow.Web/TicketFlow.Web.csproj" />
+    <Project Path="src/TicketFlow.Tests/TicketFlow.Tests.csproj" Id="693044ed-5319-4e57-9e27-d1934d901095" />
+  </Folder>
+</Solution>

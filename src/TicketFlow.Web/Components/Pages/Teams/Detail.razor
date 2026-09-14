@@ -1,0 +1,265 @@
+@page "/teams/{Id:int}"
+@using MudBlazor
+@using TicketFlow.Shared.DTOs
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>Team — Desk</PageTitle>
+
+<div style="margin-bottom:20px;">
+    <a href="/teams" class="btn btn-ghost btn-sm">← Back</a>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+}
+else if (_team is null)
+{
+    <div class="empty-state"><p>Team not found.</p></div>
+}
+else
+{
+    <div class="page-header" style="margin-bottom:20px;">
+        <div><h1>@_team.Name</h1><p>@(_team.Description ?? "No description")</p></div>
+    </div>
+
+    <div class="detail-grid">
+        <div>
+            <div class="card">
+                <div class="card-header"><h3>Assigned projects <span class="text-3 mono" style="font-weight:400;">(@_allProjects.Count(p => _assignedProjectIds.Contains(p.Id)))</span></h3></div>
+                <div class="card-body" style="display:flex; flex-direction:column; gap:10px;">
+                    @foreach (var p in _allProjects.Where(p => _assignedProjectIds.Contains(p.Id)))
+                    {
+                        <div style="display:flex; align-items:center; justify-content:space-between;">
+                            <span>@p.IconKey &nbsp;@p.Name</span>
+                            @if (_canManage)
+                            {
+                                <button class="btn btn-danger btn-sm" @onclick="() => Unassign(p)">Unassign</button>
+                            }
+                        </div>
+                    }
+
+                    @if (_canManage)
+                    {
+                        <hr class="divider" />
+
+                        <div class="field" style="margin-bottom:0;">
+                            <label>Assign to project</label>
+                            <select class="input" @bind="_assignProjectId">
+                                <option value="0">— select —</option>
+                                @foreach (var p in _allProjects.Where(p => !_assignedProjectIds.Contains(p.Id)))
+                                {
+                                    <option value="@p.Id">@p.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <button class="btn btn-ghost btn-sm" @onclick="Assign" disabled="@(_assignProjectId == 0)">+ Assign project</button>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <aside>
+            <div class="card">
+                <div class="card-header">
+                    <h3>Members <span class="text-3 mono" style="font-weight:400;">(@_members.Count)</span></h3>
+                </div>
+                <div class="card-body" style="display:flex; flex-direction:column; gap:10px;">
+                    @foreach (var m in _members)
+                    {
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                            <div>
+                                <div style="font-size:13px;">@m.MemberName</div>
+                                <div class="text-3" style="font-size:11px;">@m.Role</div>
+                            </div>
+                            @if (_canManage)
+                            {
+                                <div style="display:flex; gap:6px;">
+                                    <select class="input" style="width:auto; font-size:12px;" @onchange="e => ChangeRole(m, e.Value?.ToString())">
+                                        @foreach (var r in new[] { "Member", "Lead" })
+                                        {
+                                            <option value="@r" selected="@(m.Role == r)">@r</option>
+                                        }
+                                    </select>
+                                    <button class="btn btn-danger btn-sm" @onclick="() => RemoveMember(m)">✕</button>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    @if (_canManage)
+                    {
+                        <hr class="divider" />
+
+                        <div class="field" style="margin-bottom:0;">
+                            <label>Add user</label>
+                            <select class="input" @bind="_addUserId">
+                                <option value="0">— select —</option>
+                                @foreach (var u in _users.Where(u => !_members.Any(m => m.UserId == u.Id) && !_pendingAdds.Any(a => a.UserId == u.Id)))
+                                {
+                                    <option value="@u.Id">@u.FullName</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="field" style="margin-bottom:0;">
+                            <label>Role</label>
+                            <select class="input" @bind="_addRole">
+                                <option value="Member">Member</option>
+                                <option value="Lead">Lead</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-ghost btn-sm" @onclick="AddMember" disabled="@(_addUserId == 0)">+ Add member</button>
+
+                        @if (_hasPendingChanges)
+                        {
+                            <button class="btn btn-primary btn-sm" @onclick="SaveMembers">Save</button>
+                        }
+                    }
+                </div>
+            </div>
+        </aside>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private TeamDto? _team;
+    private List<TeamMemberDto> _members = [];
+    private List<UserDto> _users = [];
+    private List<ProjectDto> _allProjects = [];
+    private HashSet<int> _assignedProjectIds = [];
+    private bool _loading = true;
+
+    private int _addUserId;
+    private string _addRole = "Member";
+    private int _assignProjectId;
+    private bool _canManage;
+
+    private readonly List<(int MemberId, string NewRole)> _pendingRoleChanges = [];
+    private readonly List<int> _pendingRemovals = [];
+    private readonly List<AddTeamMemberDto> _pendingAdds = [];
+    private bool _hasPendingChanges => _pendingRoleChanges.Count > 0 || _pendingRemovals.Count > 0 || _pendingAdds.Count > 0;
+
+    private bool IsMyMembership(TeamMemberDto m) =>
+        AuthService.IsAgent ? m.AgentId == AuthService.AgentId : AuthService.UserId is not null && m.UserId == AuthService.UserId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthService.IsAuthenticated) { Navigation.NavigateTo("/"); return; }
+
+        _team = await ApiService.GetTeamAsync(Id);
+        if (_team is not null)
+        {
+            _members = await ApiService.GetTeamMembersAsync(Id);
+            _users = await ApiService.GetUsersAsync();
+            _allProjects = await ApiService.GetProjectsAsync();
+
+            var links = await ApiService.GetTeamProjectsAsync(Id);
+            _assignedProjectIds = [.. links.Select(l => l.ProjectId)];
+
+            _canManage = AuthService.IsManager
+                || _members.Any(m => IsMyMembership(m) && m.Role == "Lead");
+
+            if (!AuthService.IsManager && !_members.Any(IsMyMembership))
+            {
+                Navigation.NavigateTo("/");
+                return;
+            }
+        }
+
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private void AddMember()
+    {
+        if (_addUserId == 0) return;
+        _pendingAdds.Add(new AddTeamMemberDto { UserId = _addUserId, Role = _addRole });
+
+        var user = _users.First(u => u.Id == _addUserId);
+        _members.Add(new TeamMemberDto { Id = 0, TeamId = Id, UserId = _addUserId, MemberName = user.FullName, Role = _addRole });
+        _addUserId = 0;
+    }
+
+    private void ChangeRole(TeamMemberDto m, string? role)
+    {
+        if (string.IsNullOrWhiteSpace(role) || role == m.Role) return;
+        m.Role = role;
+
+        if (m.Id != 0)
+        {
+            _pendingRoleChanges.RemoveAll(c => c.MemberId == m.Id);
+            _pendingRoleChanges.Add((m.Id, role));
+        }
+    }
+
+    private void RemoveMember(TeamMemberDto m)
+    {
+        _members.Remove(m);
+        if (m.Id != 0)
+        {
+            _pendingRoleChanges.RemoveAll(c => c.MemberId == m.Id);
+            _pendingRemovals.Add(m.Id);
+        }
+        else
+        {
+            _pendingAdds.RemoveAll(a => a.UserId == m.UserId && a.Role == m.Role);
+        }
+    }
+
+    private async Task SaveMembers()
+    {
+        if (AuthService.UserId is null || !_hasPendingChanges) return;
+
+        var actingUserId = AuthService.UserId.Value;
+        var ok = true;
+
+        foreach (var memberId in _pendingRemovals)
+            ok &= await ApiService.RemoveTeamMemberAsync(Id, memberId, actingUserId);
+
+        foreach (var (memberId, newRole) in _pendingRoleChanges)
+            ok &= await ApiService.ChangeTeamMemberRoleAsync(Id, memberId, actingUserId, newRole);
+
+        foreach (var add in _pendingAdds)
+            ok &= await ApiService.AddTeamMemberAsync(Id, actingUserId, add);
+
+        _pendingRemovals.Clear();
+        _pendingRoleChanges.Clear();
+        _pendingAdds.Clear();
+
+        _members = await ApiService.GetTeamMembersAsync(Id);
+
+        Snackbar.Add(ok ? "Members saved." : "Some changes failed to save.", ok ? Severity.Success : Severity.Warning);
+    }
+
+    private async Task Assign()
+    {
+        if (_assignProjectId == 0 || AuthService.UserId is null) return;
+        var ok = await ApiService.AssignTeamToProjectAsync(Id, _assignProjectId, AuthService.UserId.Value);
+        if (ok)
+        {
+            _assignedProjectIds.Add(_assignProjectId);
+            _assignProjectId = 0;
+            Snackbar.Add("Team assigned to project.", Severity.Success);
+        }
+        else Snackbar.Add("Failed to assign team.", Severity.Error);
+    }
+
+    private async Task Unassign(ProjectDto p)
+    {
+        if (AuthService.UserId is null) return;
+        var ok = await ApiService.UnassignTeamFromProjectAsync(Id, p.Id, AuthService.UserId.Value);
+        if (ok)
+        {
+            _assignedProjectIds.Remove(p.Id);
+            Snackbar.Add("Team unassigned from project.", Severity.Success);
+        }
+        else Snackbar.Add("Failed to unassign team.", Severity.Error);
+    }
+}

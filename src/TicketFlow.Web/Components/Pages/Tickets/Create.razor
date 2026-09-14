@@ -1,0 +1,130 @@
+﻿@page "/tickets/create"
+@using MudBlazor
+@using TicketFlow.Shared.DTOs
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>New ticket - Desk</PageTitle>
+
+<div style="margin-bottom:20px;">
+    <a href="/tickets" class="btn btn-ghost btn-sm"> Back</a>
+</div>
+
+<div class="page-header" style="margin-bottom:24px;">
+    <div><h1>New ticket</h1><p>Open a support ticket on behalf of a customer</p></div>
+</div>
+
+<div style="max-width:620px;">
+    <div class="card">
+        <div class="card-body">
+            <div class="field">
+                <label>Title</label>
+                <input class="input" type="text" @bind="_title" placeholder="Brief summary of the issue" />
+            </div>
+
+            <div class="field">
+                <label>Description</label>
+                <textarea class="textarea" @bind="_description" placeholder="Steps to reproduce, expected vs actual…"></textarea>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+                <div class="field" style="margin-bottom:0;">
+                    <label>Category</label>
+                    <MudSelect @bind-Value="_categoryId" Variant="Variant.Outlined" FullWidth="true" Dense="true">
+                        @foreach (var c in _categories)
+                        {
+                            <MudSelectItem Value="@c.Id">@c.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+                <div class="field" style="margin-bottom:0;">
+                    <label>Priority</label>
+                    <MudSelect @bind-Value="_priority" Variant="Variant.Outlined" FullWidth="true" Dense="true">
+                        <MudSelectItem Value="@("Low")">Low</MudSelectItem>
+                        <MudSelectItem Value="@("Medium")">Medium</MudSelectItem>
+                        <MudSelectItem Value="@("High")">High</MudSelectItem>
+                        <MudSelectItem Value="@("Urgent")">Urgent</MudSelectItem>
+                    </MudSelect>
+                </div>
+            </div>
+
+            <div class="field" style="margin-top:14px;">
+                <label>Customer</label>
+                <MudSelect @bind-Value="_userId" Variant="Variant.Outlined" FullWidth="true" Dense="true">
+                    @foreach (var u in _users)
+                    {
+                        <MudSelectItem Value="@u.Id">@u.FullName - @u.Email</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+
+            <div class="field" style="margin-top:14px;">
+                <label>Project <span class="text-3" style="font-weight:400;">(optional)</span></label>
+                <MudSelect @bind-Value="_projectId" Variant="Variant.Outlined" FullWidth="true" Dense="true">
+                    <MudSelectItem Value="0">— none —</MudSelectItem>
+                    @foreach (var p in _projects)
+                    {
+                        <MudSelectItem Value="@p.Id">@p.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+
+            <hr class="divider" />
+
+            <div style="display:flex; justify-content:flex-end; gap:8px;">
+                <a href="/tickets" class="btn btn-ghost">Cancel</a>
+                <button class="btn btn-primary" @onclick="Submit" disabled="@_busy">
+                    @(_busy ? "Creating…" : "Create ticket")
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _title = "", _description = "", _priority = "Medium";
+    private int _categoryId, _userId, _projectId;
+    private bool _busy;
+    private List<CategoryDto> _categories = [];
+    private List<UserDto> _users = [];
+    private List<ProjectDto> _projects = [];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthService.IsAuthenticated || (!AuthService.IsManager && !AuthService.IsAgent))
+        { Navigation.NavigateTo("/"); return; }
+
+        var ct = ApiService.GetCategoriesAsync();
+        var ut = ApiService.GetUsersAsync();
+        var pt = ApiService.GetProjectsAsync();
+        await Task.WhenAll(ct, ut, pt);
+        _categories = await ct;
+        _users = await ut;
+        _projects = (await pt).Where(p => p.Status != "Archived").ToList();
+        if (_categories.Any()) _categoryId = _categories.First().Id;
+        if (_users.Any()) _userId = _users.First().Id;
+        StateHasChanged();
+    }
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_title)) { Snackbar.Add("Title is required.", Severity.Warning); return; }
+        if (_userId == 0 || _categoryId == 0) { Snackbar.Add("Select a customer and category.", Severity.Warning); return; }
+        _busy = true;
+        var r = await ApiService.CreateTicketAsync(new CreateTicketDto
+        {
+            Title = _title, Description = _description,
+            UserId = _userId, CategoryId = _categoryId, Priority = _priority,
+            ProjectId = _projectId == 0 ? null : _projectId
+        });
+        _busy = false;
+        if (r is not null) { Navigation.NavigateTo($"/tickets/{r.Id}"); }
+        else Snackbar.Add("Failed to create ticket.", Severity.Error);
+    }
+}
+
+

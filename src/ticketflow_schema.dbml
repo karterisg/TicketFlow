@@ -1,0 +1,118 @@
+Table Users {
+  Id int [pk]
+  FullName varchar
+  Email varchar
+}
+
+Table Agents {
+  Id int [pk]
+  FullName varchar
+  Email varchar
+  IsAvailable bool
+}
+
+Table Categories {
+  Id int [pk]
+  Name varchar
+}
+
+Table Tickets {
+  Id int [pk]
+  Title varchar
+  Description varchar
+  Status varchar
+  Priority varchar
+  UserId int [ref: > Users.Id]
+  AgentId int [ref: > Agents.Id]
+  CategoryId int [ref: > Categories.Id]
+  ProjectId int [ref: > Projects.Id]
+}
+
+Table Comments {
+  Id int [pk]
+  Body varchar
+  TicketId int [ref: > Tickets.Id]
+  AuthorId int [ref: > Users.Id]
+}
+
+Table TicketActivities {
+  Id int [pk]
+  ActionType varchar
+  Description varchar
+  ActorName varchar
+  TicketId int [ref: > Tickets.Id]
+}
+
+Table TimeEntries {
+  Id int [pk]
+  StartedAt datetime
+  EndedAt datetime
+  TicketId int [ref: > Tickets.Id]
+  AgentId int [ref: > Agents.Id]
+}
+
+Table ProjectCategories {
+  Id int [pk]
+  Name varchar
+}
+
+Table ProjectTemplates {
+  Id int [pk]
+  Name varchar
+  DefaultIconKey varchar
+  Timeline varchar
+  DefaultProjectCategoryId int [ref: > ProjectCategories.Id]
+}
+
+Table Projects {
+  Id int [pk]
+  Name varchar
+  Status varchar
+  IconKey varchar
+  OwnerUserId int [ref: > Users.Id]
+  ProjectCategoryId int [ref: > ProjectCategories.Id]
+}
+
+Table ProjectMembers {
+  Id int [pk]
+  ProjectId int [ref: > Projects.Id]
+  UserId int [ref: > Users.Id]
+  AgentId int [ref: > Agents.Id]
+  Role varchar
+}
+
+Table Teams {
+  Id int [pk]
+  Name varchar
+  OwnerUserId int [ref: > Users.Id]
+}
+
+Table TeamMembers {
+  Id int [pk]
+  TeamId int [ref: > Teams.Id]
+  UserId int [ref: > Users.Id]
+  AgentId int [ref: > Agents.Id]
+  Role varchar
+}
+
+Table ProjectTeams {
+  Id int [pk]
+  ProjectId int [ref: > Projects.Id]
+  TeamId int [ref: > Teams.Id]
+}
+
+Table Meetings {
+  Id int [pk]
+  Title varchar
+  Status varchar
+  ProjectId int [ref: > Projects.Id]
+  TeamId int [ref: > Teams.Id]
+}
+
+Table MeetingAttendees {
+  Id int [pk]
+  MeetingId int [ref: > Meetings.Id]
+  UserId int [ref: > Users.Id]
+  AgentId int [ref: > Agents.Id]
+  Response varchar
+}

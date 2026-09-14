@@ -1,0 +1,68 @@
+@page "/notifications"
+@using MudBlazor
+@using TicketFlow.Shared.DTOs
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NotificationState NotificationState
+@inject NavigationManager Navigation
+
+<PageTitle>Notifications — TicketFlow</PageTitle>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Style="position:fixed;top:0;left:0;right:0;" />
+}
+else
+{
+    <div style="margin-bottom:20px;">
+        <h1 style="font-size:20px; font-weight:600; color:var(--text);">Notifications</h1>
+    </div>
+
+    <div class="card">
+        <div class="card-body" style="padding-top:4px;">
+            @if (_notifications.Any())
+            {
+                @foreach (var n in _notifications)
+                {
+                    <div style="display:flex; flex-direction:column; gap:2px; padding:12px 0; border-bottom:1px solid var(--border);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                            <span style="font-size:13.5px; color:var(--text); border-left:3px solid @TypeColor(n.Type); padding-left:8px;">@n.Message</span>
+                            <span class="text-3 mono" style="font-size:11px; white-space:nowrap;">@n.CreatedAt.ToString("MMM d, HH:mm")</span>
+                        </div>
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="empty-state"><p>No notifications yet.</p></div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private List<NotificationDto> _notifications = [];
+    private bool _loading = true;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthService.IsAuthenticated) { Navigation.NavigateTo("/login"); return; }
+
+        _notifications = await ApiService.GetNotificationsAsync();
+        await ApiService.MarkNotificationsReadAsync();
+        NotificationState.SetCount(0);
+
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private static string TypeColor(string type) => type switch
+    {
+        "success" => "var(--resolved)",
+        "warning" => "#fb923c",
+        "info" => "#60a5fa",
+        _ => "var(--border)"
+    };
+}

@@ -1,0 +1,33 @@
+@page "/status/{Code:int}"
+@using MudBlazor
+@layout Layout.MainLayout
+
+<PageTitle>@Info.Title</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Style="text-align:center; margin-top:80px;">
+    <MudText Style="font-size:6rem; font-weight:700; color:#2d2d44; line-height:1;">@Code</MudText>
+    <MudText Typo="Typo.h5" Style="color:#e0e0f0; font-weight:600;" Class="mb-2">@Info.Title</MudText>
+    <MudText Typo="Typo.body1" Style="color:#6b6b8a;" Class="mb-6">
+        @Info.Message
+    </MudText>
+    <MudButton Href="/" Variant="Variant.Filled"
+               Style="background:#7c6af7; color:white; border-radius:8px;">
+        Go to Dashboard
+    </MudButton>
+</MudContainer>
+
+@code {
+    [Parameter]
+    public int Code { get; set; }
+
+    private (string Title, string Message) Info => Code switch
+    {
+        400 => ("Bad request", "The request couldn't be understood or was invalid."),
+        401 => ("Unauthorized", "You need to sign in to access this page."),
+        403 => ("Forbidden", "You don't have permission to access this page."),
+        404 => ("Page not found", "The page you're looking for doesn't exist or has been moved."),
+        409 => ("Conflict", "This request conflicts with the current state of the resource."),
+        500 => ("Server error", "Something went wrong on our end. Please try again later."),
+        _ => ("Unexpected error", "Something went wrong while processing your request.")
+    };
+}

@@ -1,0 +1,238 @@
+@inherits LayoutComponentBase
+@using MudBlazor
+@using TicketFlow.Web.Services
+@using Microsoft.AspNetCore.SignalR.Client
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NotificationState NotificationState
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<MudThemeProvider IsDarkMode="_isDarkMode" />
+<MudPopoverProvider />
+<MudSnackbarProvider />
+<MudDialogProvider />
+
+
+
+@if (!AuthService.IsAuthenticated)
+{
+    @Body
+}
+else
+{
+    <div class="app-shell @(_isDarkMode ? "" : "theme-light")">
+
+        @* Mobile backdrop � clicking it closes the sidebar *@
+        @if (_sidebarOpen)
+        {
+            <div class="sidebar-backdrop" @onclick="ToggleSidebar"></div>
+        }
+
+        <aside class="sidebar @(_sidebarCollapsed ? "sidebar-collapsed" : "") @(_sidebarOpen ? "sidebar-open" : "")">
+            <div class="sidebar-header">
+                @if (!_sidebarCollapsed)
+                {
+                    <span class="sidebar-logo">Support<span>Desk</span></span>
+                }
+
+                @* Burger / collapse button *@
+                <button class="burger-btn" @onclick="ToggleCollapse" title="Toggle sidebar">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+                         fill="none" stroke="currentColor" stroke-width="1.8"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="3" y1="6" x2="21" y2="6" />
+                        <line x1="3" y1="12" x2="21" y2="12" />
+                        <line x1="3" y1="18" x2="21" y2="18" />
+                    </svg>
+                </button>
+            </div>                  
+
+            <nav class="sidebar-nav">
+                <NavMenu UnreadCount="NotificationState.UnreadCount" Collapsed="_sidebarCollapsed" />
+            </nav>
+
+            <div class="sidebar-footer">
+                @if (!_sidebarCollapsed)
+                {
+                    <div class="user-info" style="cursor:pointer;" @onclick='() => Navigation.NavigateTo("/change-password")' title="Change password">
+                        <span class="user-name">@AuthService.FullName</span>
+                        <span class="user-role">@AuthService.Role</span>
+                    </div>
+                }
+
+                @* Dark / Light mode toggle *@
+                <button class="btn-logout" @onclick="ToggleTheme"
+                        title="@(_isDarkMode ? "Switch to light mode" : "Switch to dark mode")">
+                    @if (_isDarkMode)
+                    {
+                        @* Sun icon � switch to light *@
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                             fill="none" stroke="currentColor" stroke-width="1.8"
+                             stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="5" />
+                            <line x1="12" y1="1" x2="12" y2="3" />
+                            <line x1="12" y1="21" x2="12" y2="23" />
+                            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                            <line x1="1" y1="12" x2="3" y2="12" />
+                            <line x1="21" y1="12" x2="23" y2="12" />
+                            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                        </svg>
+                    }
+                    else
+                    {
+                        @* Moon icon � switch to dark *@
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                             fill="none" stroke="currentColor" stroke-width="1.8"
+                             stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                        </svg>
+                    }
+                </button>
+
+                @* Logout button *@
+                <button class="btn-logout" @onclick="HandleLogout" title="Sign out">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                         fill="none" stroke="currentColor" stroke-width="1.8"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                        <polyline points="16 17 21 12 16 7" />
+                        <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                </button>
+            </div>
+        </aside>
+
+        <main class="main-area">
+            @* Mobile topbar with burger *@
+            <div class="topbar">
+                <button class="burger-btn" @onclick="ToggleSidebar" title="Menu">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+                         fill="none" stroke="currentColor" stroke-width="1.8"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="3" y1="6" x2="21" y2="6" />
+                        <line x1="3" y1="12" x2="21" y2="12" />
+                        <line x1="3" y1="18" x2="21" y2="18" />
+                    </svg>
+                </button>
+                <span class="sidebar-logo" style="font-size:13px;">Support<span style="color:var(--accent)">Desk</span></span>
+            </div>
+
+            <div class="page-content">
+                @Body
+            </div>
+        </main>
+    </div>
+}
+
+@code {
+    private HubConnection? _hubConnection;
+    private bool _isDarkMode = true;
+    private bool _sidebarCollapsed = false;
+    private bool _sidebarOpen = false; // mobile overlay
+
+    protected override void OnInitialized()
+    {
+        NotificationState.Changed += OnNotificationStateChanged;
+    }
+
+    private void OnNotificationStateChanged() => InvokeAsync(StateHasChanged);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // Restore session so refresh doesn't log out
+        await AuthService.RestoreAsync(JS);
+
+        if (!AuthService.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
+
+        var unread = await ApiService.GetUnreadNotificationCountAsync();
+        NotificationState.SetCount(unread);
+
+        await ConnectToHubAsync();
+        StateHasChanged();
+    }
+
+    private void ToggleCollapse() => _sidebarCollapsed = !_sidebarCollapsed;
+
+    private void ToggleSidebar() => _sidebarOpen = !_sidebarOpen;
+
+    private void ToggleTheme() => _isDarkMode = !_isDarkMode;
+
+    private async void ToggleSidebarOnMobile()
+    {
+        if (await IsMobile())
+            _sidebarOpen = false;
+    }
+
+    private async Task ConnectToHubAsync()
+    {
+        try
+        {
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl("https://localhost:7216/hubs/notifications")
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hubConnection.On<NotificationPayload>("ReceiveNotification", payload =>
+            {
+                var severity = payload.Type switch
+                {
+                    "success" => Severity.Success,
+                    "info" => Severity.Info,
+                    "warning" => Severity.Warning,
+                    _ => Severity.Normal
+                };
+
+                Snackbar.Add(payload.Message, severity, config =>
+                {
+                    config.VisibleStateDuration = 4000;
+                });
+
+                NotificationState.Increment();
+            });
+
+            await _hubConnection.StartAsync();
+
+            if (AuthService.UserId.HasValue)
+                await _hubConnection.InvokeAsync("JoinUserGroup", AuthService.UserId.Value.ToString());
+        }
+        catch
+        {
+            // If API is not running, don't crash the app
+        }
+    }
+
+    private async void HandleLogout()
+    {
+        if (_hubConnection is not null)
+            await _hubConnection.DisposeAsync();
+
+        NotificationState.SetCount(0);
+        await AuthService.LogoutAsync(JS);
+        Navigation.NavigateTo("/login", forceLoad: true);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        NotificationState.Changed -= OnNotificationStateChanged;
+        if (_hubConnection is not null)
+            await _hubConnection.DisposeAsync();
+    }
+
+    private async Task<bool> IsMobile()
+    {
+        return await JS.InvokeAsync<bool>("eval", "window.innerWidth <= 640");
+    }
+
+    private record NotificationPayload(string Message, string Type);
+}

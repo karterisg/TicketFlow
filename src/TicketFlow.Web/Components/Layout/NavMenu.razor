@@ -1,0 +1,234 @@
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NavigationManager Navigation
+
+<a href="/" class="nav-item @IsActive("/", exact: true)" title="Overview">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="7" height="7" />
+        <rect x="14" y="3" width="7" height="7" />
+        <rect x="14" y="14" width="7" height="7" />
+        <rect x="3" y="14" width="7" height="7" />
+    </svg>
+    @if (!Collapsed)
+    {
+        <span>Overview</span>
+    }
+</a>
+
+<a href="/tickets" class="nav-item @IsActive("/tickets")" title="Tickets">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+        <polyline points="10 9 9 9 8 9" />
+    </svg>
+    @if (!Collapsed)
+    {
+        <span>Tickets</span>
+    }
+</a>
+
+@if (AuthService.IsManager || AuthService.IsAgent)
+{
+    <a href="/tickets/create" class="nav-item @IsActive("/tickets/create")" title="New Ticket">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="16" />
+            <line x1="8" y1="12" x2="16" y2="12" />
+        </svg>
+        @if (!Collapsed)
+        {
+            <span>New Ticket</span>
+        }
+    </a>
+}
+
+@if (AuthService.IsManager || AuthService.IsAgent || AuthService.HasPermission("Agents.Manage"))
+{
+    <a href="/agents" class="nav-item @IsActive("/agents")" title="Agents">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+        @if (!Collapsed)
+        {
+            <span>Agents</span>
+        }
+    </a>
+}
+
+@if (AuthService.IsManager || AuthService.IsAgent || AuthService.HasPermission("Reports.View"))
+{
+    <a href="/reports" class="nav-item @IsActive("/reports")" title="Reports">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="20" x2="18" y2="10" />
+            <line x1="12" y1="20" x2="12" y2="4" />
+            <line x1="6" y1="20" x2="6" y2="14" />
+        </svg>
+        @if (!Collapsed)
+        {
+            <span>Reports</span>
+        }
+    </a>
+}
+
+@if (AuthService.IsManager || _hasProjects || AuthService.HasPermission("Projects.Manage"))
+{
+    <a href="/projects" class="nav-item @IsActive("/projects")" title="Projects">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-8l-2-2H5a2 2 0 0 0-2 2z" />
+        </svg>
+        @if (!Collapsed)
+        {
+            <span>Projects</span>
+        }
+    </a>
+}
+
+@if (AuthService.IsManager || _hasTeams || AuthService.HasPermission("Teams.Manage"))
+{
+    <a href="/teams" class="nav-item @IsActive("/teams")" title="Teams">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+        @if (!Collapsed)
+        {
+            <span>Teams</span>
+        }
+    </a>
+}
+
+@if (AuthService.IsManager || _hasProjects || _hasTeams || AuthService.HasPermission("Meetings.Manage"))
+{
+    <a href="/meetings" class="nav-item @IsActive("/meetings")" title="Meetings">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+        </svg>
+        @if (!Collapsed)
+        {
+            <span>Meetings</span>
+        }
+    </a>
+}
+
+@{
+    var showCategories = AuthService.IsManager || AuthService.HasPermission("Categories.Manage");
+    var showUsers = AuthService.IsManager || AuthService.HasPermission("Users.Manage");
+    var showAdminSection = showCategories || showUsers || AuthService.IsManager;
+}
+
+@if (showAdminSection)
+{
+    @if (!Collapsed)
+    {
+        <div class="nav-section">Admin</div>
+    }
+
+    @if (showCategories)
+    {
+        <a href="/categories" class="nav-item @IsActive("/categories")" title="Categories">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="8" y1="6" x2="21" y2="6" />
+                <line x1="8" y1="12" x2="21" y2="12" />
+                <line x1="8" y1="18" x2="21" y2="18" />
+                <line x1="3" y1="6" x2="3.01" y2="6" />
+                <line x1="3" y1="12" x2="3.01" y2="12" />
+                <line x1="3" y1="18" x2="3.01" y2="18" />
+            </svg>
+            @if (!Collapsed)
+            {
+                <span>Categories</span>
+            }
+        </a>
+    }
+
+    @if (showUsers)
+    {
+        <a href="/users" class="nav-item @IsActive("/users")" title="Users">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+            </svg>
+            @if (!Collapsed)
+            {
+                <span>Users</span>
+            }
+        </a>
+    }
+
+    @* Managing permissions is Manager-only, regardless of granted permissions — never delegated. *@
+    @if (AuthService.IsManager)
+    {
+        <a href="/permissions" class="nav-item @IsActive("/permissions")" title="Permissions">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            @if (!Collapsed)
+            {
+                <span>Permissions</span>
+            }
+        </a>
+    }
+}
+
+@* Notification bell with unread counter *@
+<a href="/notifications" class="nav-item notification-bell" title="Notifications">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </svg>
+    @if (!Collapsed)
+    {
+        <span>Notifications</span>
+    }
+    @if (UnreadCount > 0)
+    {
+        <span class="notification-badge">@(UnreadCount > 99 ? "99+" : UnreadCount.ToString())</span>
+    }
+</a>
+
+@code {
+    [Parameter] public int UnreadCount { get; set; }
+    [Parameter] public bool Collapsed { get; set; }
+
+    private bool _hasProjects;
+    private bool _hasTeams;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthService.IsAuthenticated || AuthService.IsManager) return;
+
+        if (AuthService.IsAgent)
+        {
+            _hasProjects = (await ApiService.GetProjectsAsync(forAgentId: AuthService.AgentId)).Count > 0;
+            _hasTeams = (await ApiService.GetTeamsAsync(forAgentId: AuthService.AgentId)).Count > 0;
+        }
+        else
+        {
+            _hasProjects = (await ApiService.GetProjectsAsync(forUserId: AuthService.UserId)).Count > 0;
+            _hasTeams = (await ApiService.GetTeamsAsync(forUserId: AuthService.UserId)).Count > 0;
+        }
+
+        StateHasChanged();
+    }
+
+    private string IsActive(string href, bool exact = false)
+    {
+        var current = Navigation.Uri.Replace(Navigation.BaseUri, "/");
+        if (!current.StartsWith("/")) current = "/" + current;
+        return exact
+            ? (current == href ? "active" : "")
+            : (current.StartsWith(href) && href != "/" ? "active" : current == href ? "active" : "");
+    }
+}

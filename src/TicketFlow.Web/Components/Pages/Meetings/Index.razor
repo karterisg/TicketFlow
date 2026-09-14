@@ -1,0 +1,292 @@
+@page "/meetings"
+@using MudBlazor
+@using TicketFlow.Shared.DTOs
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>Meetings — Desk</PageTitle>
+
+<div class="page-header">
+    <div><h1>@(AuthService.IsManager ? "Meetings" : "My Meetings")</h1><p>@_totalCount scheduled</p></div>
+    <div style="display:flex; gap:8px;">
+        <button class="btn btn-primary" @onclick="() => _showAdd = true">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Schedule meeting
+        </button>
+    </div>
+</div>
+
+<div class="filter-bar">
+    <input class="search-input" type="text" placeholder="Search meetings…"
+           value="@_search" @oninput="OnSearchInput" />
+</div>
+
+<div class="card" style="overflow:hidden;">
+    <MudDataGrid @ref="_grid" T="MeetingDto" ServerData="ServerReload" Loading="_loading"
+                 Hover="true" Dense="true" RowsPerPage="15" Height="calc(79vh - 260px)" FixedHeader="true">
+        <Columns>
+            <PropertyColumn Property="x => x.Title" Title="Title" />
+            <PropertyColumn Property="x => x.ScheduledAt" Title="When">
+                <CellTemplate>
+                    <span class="text-2 mono">@context.Item.ScheduledAt.ToLocalTime().ToString("g")</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.ProjectName" Title="Project / Team">
+                <CellTemplate>
+                    <span class="text-2">@(context.Item.ProjectName ?? context.Item.TeamName ?? "—")</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.AttendeeCount" Title="Attendees">
+                <CellTemplate>
+                    <span class="text-2 mono">@context.Item.AttendeeCount</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.Status" Title="Status">
+                <CellTemplate>
+                    @* <span class="badge @(context.Item.Status == "Cancelled" ? "badge-closed" : "badge-open")">@context.Item.Status</span> *@
+                    <span class="badge @(context.Item.Status == "Cancelled" ? "badge-closed" : context.Item.Status == "Scheduled" ? "badge-open" : context.Item.Status == "InProgress" ? "badge-inprogress" : "badge-completed")">@context.Item.Status</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.Id" Title="Your RSVP">
+                <CellTemplate>
+                    @{ var mine = MyAttendee(context.Item); }
+                    @if (mine is null)
+                    {
+                        <span class="text-2">—</span>
+                    }
+                    else if (context.Item.Status != "Scheduled")
+                    {
+                        <span class="text-2">@mine.Response</span>
+                    }
+                    else if (mine.Response == "Pending")
+                    {
+                        <div style="display:flex; gap:6px;">
+                            <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => Respond(context.Item, mine, true)">Accept</button>
+                            <button class="btn btn-ghost btn-sm" disabled="@_busy" @onclick="() => Respond(context.Item, mine, false)">Decline</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <span class="badge @(mine.Response == "Accepted" ? "badge-open" : "badge-closed")">@mine.Response</span>
+                    }
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.Id" Title="">
+                <CellTemplate>
+                    <div style="text-align:right;">
+                        @if (context.Item.Status == "Scheduled")
+                        {
+                            <button class="btn btn-danger btn-sm" @onclick="() => Cancel(context.Item)">Cancel</button>
+                        }
+                    </div>
+                </CellTemplate>
+            </PropertyColumn>
+        </Columns>
+        <NoRecordsContent>
+            <div class="empty-state">
+                <p>No meetings match your search.</p>
+            </div>
+        </NoRecordsContent>
+        <PagerContent>
+            <MudDataGridPager T="MeetingDto" />
+        </PagerContent>
+    </MudDataGrid>
+</div>
+
+@if (_showAdd)
+{
+    <div class="dialog-overlay" @onclick="() => _showAdd = false">
+        <div class="dialog-box" @onclick:stopPropagation="true">
+            <div class="dialog-title">Schedule meeting</div>
+            <div class="field">
+                <label>Title</label>
+                <input class="input" type="text" @bind="_newTitle" placeholder="e.g. Sprint planning" />
+            </div>
+            <div class="field">
+                <label>Description</label>
+                <input class="input" type="text" @bind="_newDescription" placeholder="Optional" />
+            </div>
+            <div class="field">
+                <label>Project</label>
+                <select class="input" @bind="_newProjectId">
+                    <option value="0">— none —</option>
+                    @foreach (var p in _projects)
+                    {
+                        <option value="@p.Id">@p.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="field">
+                <label>Team</label>
+                <select class="input" @bind="_newTeamId">
+                    <option value="0">— none —</option>
+                    @foreach (var t in _teams)
+                    {
+                        <option value="@t.Id">@t.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="field">
+                <label>Date &amp; time</label>
+                <input class="input" type="datetime-local" @bind="_newScheduledAt" />
+            </div>
+            <div class="field">
+                <label>Duration (minutes)</label>
+                <input class="input" type="number" @bind="_newDuration" />
+            </div>
+            <div class="field">
+                <label>Location / link</label>
+                <input class="input" type="text" @bind="_newLocation" placeholder="Optional" />
+            </div>
+            <div class="dialog-actions">
+                <button class="btn btn-ghost" @onclick="() => _showAdd = false">Cancel</button>
+                <button class="btn btn-primary" @onclick="Add" disabled="@_busy">Schedule</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private MudDataGrid<MeetingDto> _grid = default!;
+    private List<ProjectDto> _projects = [];
+    private List<TeamDto> _teams = [];
+    private bool _loading = true, _showAdd, _busy;
+
+    private string _newTitle = "", _newDescription = "", _newLocation = "";
+    private int _newProjectId, _newTeamId;
+    private DateTime _newScheduledAt = DateTime.Now.AddHours(1);
+    private int _newDuration = 30;
+    private string _search = "";
+    private int _totalCount;
+    private CancellationTokenSource? _debounceCts;
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        _search = e.Value?.ToString() ?? "";
+
+        _debounceCts?.Cancel();
+        _debounceCts = new CancellationTokenSource();
+        var token = _debounceCts.Token;
+        _ = DebounceReload(token);
+    }
+
+    private async Task DebounceReload(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(400, token);
+            if (token.IsCancellationRequested) return;
+            _grid.NavigateTo(Page.First);
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthService.IsAuthenticated) { Navigation.NavigateTo("/"); return; }
+
+        if (AuthService.IsManager)
+        {
+            _projects = await ApiService.GetProjectsAsync();
+            _teams = await ApiService.GetTeamsAsync();
+        }
+        else
+        {
+            _projects = AuthService.IsAgent
+                ? await ApiService.GetProjectsAsync(forAgentId: AuthService.AgentId)
+                : await ApiService.GetProjectsAsync(forUserId: AuthService.UserId);
+            _teams = AuthService.IsAgent
+                ? await ApiService.GetTeamsAsync(forAgentId: AuthService.AgentId)
+                : await ApiService.GetTeamsAsync(forUserId: AuthService.UserId);
+        }
+
+        await _grid.ReloadServerData();
+    }
+
+    private async Task<GridData<MeetingDto>> ServerReload(GridState<MeetingDto> state)
+    {
+        var result = AuthService.IsManager
+            ? await ApiService.GetMeetingsPagedAsync(state.Page + 1, state.PageSize, _search)
+            : AuthService.IsAgent
+                ? await ApiService.GetMeetingsPagedAsync(state.Page + 1, state.PageSize, _search, forAgentId: AuthService.AgentId)
+                : await ApiService.GetMeetingsPagedAsync(state.Page + 1, state.PageSize, _search, forUserId: AuthService.UserId);
+
+        _loading = false;
+        _totalCount = result?.TotalCount ?? 0;
+        return new GridData<MeetingDto> { TotalItems = result?.TotalCount ?? 0, Items = result?.Items ?? [] };
+    }
+
+    private async Task Add()
+    {
+        if (string.IsNullOrWhiteSpace(_newTitle)) { Snackbar.Add("Title is required.", Severity.Warning); return; }
+        if (_newProjectId == 0 && _newTeamId == 0) { Snackbar.Add("Pick a project or a team.", Severity.Warning); return; }
+        if (AuthService.UserId is null) { Snackbar.Add("Your account has no linked user profile. Please log out and back in.", Severity.Error); return; }
+        _busy = true;
+
+        var dto = new CreateMeetingDto
+        {
+            Title = _newTitle,
+            Description = string.IsNullOrWhiteSpace(_newDescription) ? null : _newDescription,
+            ProjectId = _newProjectId == 0 ? null : _newProjectId,
+            TeamId = _newTeamId == 0 ? null : _newTeamId,
+            CreatedByUserId = AuthService.UserId.Value,
+            ScheduledAt = _newScheduledAt.ToUniversalTime(),
+            DurationMinutes = _newDuration,
+            LocationOrLink = string.IsNullOrWhiteSpace(_newLocation) ? null : _newLocation
+        };
+
+        var r = await ApiService.CreateMeetingAsync(dto);
+        _busy = false;
+
+        if (r is not null)
+        {
+            _showAdd = false;
+            _newTitle = ""; _newDescription = ""; _newLocation = ""; _newProjectId = 0; _newTeamId = 0;
+            Snackbar.Add("Meeting scheduled.", Severity.Success);
+            await _grid.ReloadServerData();
+        }
+        else
+        {
+            Snackbar.Add("Failed to schedule meeting.", Severity.Error);
+        }
+
+    }
+
+    private async Task Cancel(MeetingDto m)
+    {
+        if (AuthService.UserId is null) return;
+        var ok = await ApiService.CancelMeetingAsync(m.Id, AuthService.UserId.Value);
+        if (ok) { Snackbar.Add("Meeting cancelled.", Severity.Success); await _grid.ReloadServerData(); }
+        else Snackbar.Add("Failed to cancel meeting.", Severity.Error);
+    }
+
+    private MeetingAttendeeDto? MyAttendee(MeetingDto m)
+    {
+        if (AuthService.IsAgent && AuthService.AgentId.HasValue)
+            return m.Attendees.FirstOrDefault(a => a.AgentId == AuthService.AgentId);
+        if (AuthService.UserId.HasValue)
+            return m.Attendees.FirstOrDefault(a => a.UserId == AuthService.UserId);
+        return null;
+    }
+
+    private async Task Respond(MeetingDto m, MeetingAttendeeDto mine, bool accept)
+    {
+        _busy = true;
+        var dto = new RespondToMeetingDto
+        {
+            UserId = mine.UserId,
+            AgentId = mine.AgentId,
+            Response = accept ? "Accepted" : "Declined"
+        };
+
+        var ok = await ApiService.RespondToMeetingAsync(m.Id, dto);
+        _busy = false;
+
+        if (ok) { Snackbar.Add(accept ? "Meeting accepted." : "Meeting declined.", Severity.Success); await _grid.ReloadServerData(); }
+        else Snackbar.Add("Failed to respond.", Severity.Error);
+    }
+}

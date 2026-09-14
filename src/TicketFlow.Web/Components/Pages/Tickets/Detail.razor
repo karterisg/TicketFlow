@@ -1,0 +1,649 @@
+@page "/tickets/{Id:int}"
+@using MudBlazor
+@using TicketFlow.Shared.DTOs
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<PageTitle>Ticket #@Id — TicketFlow</PageTitle>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Style="position:fixed;top:0;left:0;right:0;" />
+}
+else if (_ticket is null)
+{
+    <div class="empty-state"><p>Ticket not found.</p></div>
+}
+else
+{
+    <div style="margin-bottom:20px; display:flex; align-items:center; gap:10px;">
+        <a href="/tickets" class="btn btn-ghost btn-sm">← Back</a>
+        <span class="text-3 mono" style="font-size:12px;">#@_ticket.Id</span>
+    </div>
+
+    <div style="margin-bottom:24px;">
+        <h1 style="font-size:20px; font-weight:600; color:var(--text); margin-bottom:6px;">@_ticket.Title</h1>
+        <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+            <span class="@StatusBadge(_ticket.Status)">@_ticket.Status</span>
+            <span class="priority-mark @PriorityClass(_ticket.Priority)" style="font-size:12px;">@_ticket.Priority priority</span>
+            <span class="text-3" style="font-size:12px;">opened @_ticket.CreatedAt.ToString("MMM d, yyyy")</span>
+        </div>
+    </div>
+
+    <div class="detail-grid">
+
+        @* ── Left column: Description + Comments ── *@
+        <div>
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header"><h3>Description</h3></div>
+                <div class="card-body">
+                    <p style="color:var(--text-2); line-height:1.7; font-size:13.5px;">
+                        @(string.IsNullOrWhiteSpace(_ticket.Description) ? "No description provided." : _ticket.Description)
+                    </p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Comments <span class="text-3 mono" style="font-weight:400;">(@_comments.Count)</span></h3>
+                </div>
+                <div class="card-body" style="padding-top:4px;">
+                    @if (_comments.Any())
+                    {
+                        @foreach (var c in _comments)
+                        {
+                            <div class="comment">
+                                <div class="comment-header">
+                                    <span class="comment-author">@c.AuthorName</span>
+                                    <span class="comment-date">@c.CreatedAt.ToString("MMM d, HH:mm")</span>
+                                </div>
+                                <p class="comment-body">@c.Body</p>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <p class="text-3" style="font-size:13px; padding:12px 0 4px;">No comments yet.</p>
+                    }
+
+                    @if (AuthService.UserId.HasValue && _ticket.Status != "Closed")
+                    {
+                        <hr class="divider" />
+                        <div class="field" style="margin-bottom:10px;">
+                            <textarea class="textarea" placeholder="Leave a comment…"
+                                      @bind="_commentBody" style="min-height:80px;"></textarea>
+                        </div>
+                        <button class="btn btn-primary btn-sm" @onclick="AddComment" disabled="@_commentBusy">
+                            @(_commentBusy ? "Posting…" : "Post comment")
+                        </button>
+                    }
+                </div>
+            </div>
+
+            @if (AuthService.IsCustomer && AuthService.UserId == _ticket.UserId
+                 && (_ticket.Status == "Resolved" || _ticket.Status == "Closed"))
+            {
+                <div class="card" style="margin-top:16px;">
+                    <div class="card-header"><h3>Your Feedback</h3></div>
+                    <div class="card-body">
+                        @if (_rating is not null)
+                        {
+                            <span class="badge">@RatingLabel(_rating.Score)</span>
+                            @if (!string.IsNullOrWhiteSpace(_rating.Comment))
+                            {
+                                <p class="text-3" style="font-size:13px; margin-top:8px;">@_rating.Comment</p>
+                            }
+                        }
+                        else
+                        {
+                            <p class="text-3" style="font-size:13px; margin-bottom:8px;">How was your support experience?</p>
+                            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">
+                                @for (var i = 1; i <= 5; i++)
+                                {
+                                    var score = i;
+                                    <button type="button" class="@("btn btn-sm " + (_ratingScore == score ? "btn-primary" : "btn-ghost"))"
+                                            @onclick="() => _ratingScore = score">
+                                        @RatingLabel(score)
+                                    </button>
+                                }
+                            </div>
+                            <div class="field" style="margin:10px 0;">
+                                <textarea class="textarea" placeholder="Optional comment…" @bind="_ratingComment" style="min-height:60px;"></textarea>
+                            </div>
+                            <button class="btn btn-primary btn-sm" @onclick="SubmitRating" disabled="@_ratingBusy">
+                                @(_ratingBusy ? "Submitting…" : "Submit rating")
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        @* ── Right column: Details + Actions + Time Tracking ── *@
+        <aside>
+
+            @* Details card *@
+            <div class="card" style="margin-bottom:12px;">
+                <div class="card-header"><h3>Details</h3></div>
+                <div class="card-body">
+                    <div class="detail-meta">
+                        <div class="meta-item">
+                            <label>Status</label>
+                            <span class="@StatusBadge(_ticket.Status)">@_ticket.Status</span>
+                        </div>
+                        <div class="meta-item">
+                            <label>Priority</label>
+                            <span class="priority-mark @PriorityClass(_ticket.Priority)">@_ticket.Priority</span>
+                        </div>
+                        <div class="meta-item">
+                            <label>Category</label>
+                            <span>@_ticket.CategoryName</span>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(_ticket.ProjectName))
+                        {
+                            <div class="meta-item">
+                                <label>Project</label>
+                                <span>@_ticket.ProjectName</span>
+                            </div>
+                        }
+                        <div class="meta-item">
+                            <label>Customer</label>
+                            <span>@_ticket.UserName</span>
+                        </div>
+                        <div class="meta-item">
+                            <label>Agent</label>
+                            <span>@(_ticket.AgentName ?? "—")</span>
+                        </div>
+                        @if (_ticket.ResolvedAt.HasValue)
+                        {
+                            <div class="meta-item">
+                                <label>Resolved</label>
+                                <span style="color:var(--resolved);">@_ticket.ResolvedAt.Value.ToString("MMM d, yyyy")</span>
+                            </div>
+                        }
+                        <div class="meta-item">
+                            <label>Deadline</label>
+                            @if (_ticket.DueDate.HasValue)
+                            {
+                                <span style="color:@SlaColor(_slaStatus.Color);">
+                                    @_ticket.DueDate.Value.ToString("MMM d, yyyy HH:mm")
+                                    @(_slaStatus.IsBreached ? " (overdue)" : _slaStatus.IsWarning ? " (due soon)" : "")
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="text-3">—</span>
+                            }
+                        </div>
+                    </div>
+
+                    @if (AuthService.IsAgent || AuthService.IsManager)
+                    {
+                        <hr class="divider" />
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <input type="datetime-local" class="input" style="width:100%;"
+                                   @bind="_dueDateEdit" />
+                            <button class="btn btn-ghost btn-sm" @onclick="SaveDueDate" disabled="@_dueDateBusy">
+                                Set
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @* Actions card — visible to Agent and Manager *@
+            @if (AuthService.IsManager || AuthService.IsAgent)
+            {
+                <div class="card" style="margin-bottom:12px;">
+                    <div class="card-header"><h3>Actions</h3></div>
+                    <div class="card-body" style="display:flex; flex-direction:column; gap:8px;">
+
+                        @* Assign — only Manager, only when Open *@
+                        @if (AuthService.IsManager && _ticket.Status == "Open" && _agents.Any(a => a.IsAvailable))
+                        {
+                            <MudSelect @bind-Value="_agentId" Label="Assign to" Variant="Variant.Outlined"
+                                       FullWidth="true" Dense="true">
+                                @foreach (var a in _agents.Where(a => a.IsAvailable))
+                                {
+                                    <MudSelectItem Value="@a.Id">@a.FullName</MudSelectItem>
+                                }
+                            </MudSelect>
+                            <button class="btn btn-primary btn-sm" @onclick="Assign" disabled="@_busy">Assign</button>
+                        }
+
+                        @* Resolve — only when InProgress *@
+                        @if (_ticket.Status == "InProgress")
+                        {
+                            <button class="btn btn-sm"
+                                    style="background:rgba(74,222,128,0.12);color:var(--resolved);border:1px solid rgba(74,222,128,0.2);"
+                                    @onclick="Resolve" disabled="@_busy">
+                                Mark resolved
+                            </button>
+                        }
+
+                        @* Close — always visible unless already Closed *@
+                        @if (_ticket.Status != "Closed")
+                        {
+                            <button class="btn btn-ghost btn-sm" @onclick="Close" disabled="@_busy">Close ticket</button>
+                        }
+
+                        @* Delete — only Manager *@
+                        @if (AuthService.IsManager)
+                        {
+                            <button class="btn btn-danger btn-sm" @onclick="Delete">Delete ticket</button>
+                        }
+                    </div>
+                </div>
+            }
+
+            @* Time Tracking card — visible to Agent and Manager, only when InProgress *@
+            @if ((AuthService.IsAgent || AuthService.IsManager) && _ticket.Status == "InProgress")
+            {
+                <div class="card">
+                    <div class="card-header"><h3>Time Tracking</h3></div>
+                    <div class="card-body" style="display:flex; flex-direction:column; gap:12px;">
+
+                        @* Timer display *@
+                        <div style="text-align:center;">
+                            <div style="font-size:32px; font-weight:600; font-family:var(--font-mono); color:var(--text);">
+                                @FormatTime(_elapsed)
+                            </div>
+                            <div style="font-size:12px; color:var(--text-3); margin-top:4px;">
+                                Total logged: @($"{TotalLoggedMinutes / 60}h {TotalLoggedMinutes % 60}m")
+                            </div>
+                            @if (_ticket.DueDate.HasValue)
+                            {
+                                <div style="font-size:12px; margin-top:6px; color:@SlaColor(_slaStatus.Color);">
+                                    @if (_slaStatus.IsBreached)
+                                    {
+                                        <span>⚠ Overdue by @Math.Abs(_slaStatus.MinutesRemaining) min</span>
+                                    }
+                                    else
+                                    {
+                                        <span>@_slaStatus.MinutesRemaining min until deadline</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+
+                        @* Start / Stop button *@
+                        @if (!_timerRunning)
+                        {
+                            <button class="btn btn-primary btn-sm" @onclick="StartTimer" disabled="@_timeBusy">
+                                ▶ Start Timer
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm"
+                                    style="background:rgba(239,68,68,0.12);color:#f87171;border:1px solid rgba(239,68,68,0.2);"
+                                    @onclick="StopTimer" disabled="@_timeBusy">
+                                ■ Stop Timer
+                            </button>
+                        }
+
+                        @* Manual log *@
+                        <hr class="divider" />
+                        <div style="font-size:12px; color:var(--text-3); font-weight:600; letter-spacing:0.06em; text-transform:uppercase;">
+                            Log time manually
+                        </div>
+                        <input type="number" class="input" placeholder="Minutes"
+                               @bind="_manualMinutes" style="width:100%;" min="1" />
+                        <input type="text" class="input" placeholder="Note (optional)"
+                               @bind="_timeNote" style="width:100%;" />
+                        <button class="btn btn-ghost btn-sm"
+                                @onclick="LogTime"
+                                disabled="@(_timeBusy || _manualMinutes <= 0)">
+                            + Log time
+                        </button>
+
+                        @* History *@
+                        @if (_timeEntries.Any(e => !e.IsRunning))
+                        {
+                            <hr class="divider" />
+                            <div style="font-size:12px; color:var(--text-3); font-weight:600; letter-spacing:0.06em; text-transform:uppercase;">
+                                History
+                            </div>
+                            @foreach (var entry in _timeEntries.Where(e => !e.IsRunning))
+                            {
+                                <div style="display:flex; justify-content:space-between; font-size:12.5px; color:var(--text-2);">
+                                    <span>@entry.AgentName</span>
+                                    <span class="mono">@($"{entry.TotalMinutes / 60}h {entry.TotalMinutes % 60}m")</span>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(entry.Note))
+                                {
+                                    <div style="font-size:11.5px; color:var(--text-3); margin-top:-8px;">
+                                        @entry.Note
+                                    </div>
+                                }
+                            }
+                        }
+
+                    </div>
+                </div>
+            }
+
+            @* Activity Log card *@
+            <div class="card" style="margin-top:12px;">
+                <div class="card-header"><h3>Activity</h3></div>
+                <div class="card-body" style="padding-top:4px;">
+                    @if (_activities.Any())
+                    {
+                        @foreach (var a in _activities)
+                        {
+                            <div style="display:flex; flex-direction:column; gap:2px; padding:8px 0; border-bottom:1px solid var(--border);">
+                                <div style="display:flex; justify-content:space-between; font-size:12.5px;">
+                                    <span style="color:var(--text-2); font-weight:500;">@a.ActorName</span>
+                                    <span class="text-3 mono" style="font-size:11px;">@a.CreatedAt.ToString("MMM d, HH:mm")</span>
+                                </div>
+                                <span class="text-3" style="font-size:12px;">@a.Description</span>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <p class="text-3" style="font-size:13px; padding:4px 0;">No activity yet.</p>
+                    }
+                </div>
+            </div>
+
+        </aside>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    // ── Core state ──────────────────────────────────────────────────────
+    private TicketDto? _ticket;
+    private List<CommentDto> _comments = [];
+    private List<TicketActivityDto> _activities = [];
+    private List<AgentDto> _agents = [];
+    private bool _loading = true, _busy, _commentBusy;
+    private string _commentBody = "";
+    private int _agentId;
+
+    // ── Rating state ─────────────────────────────────────────────────────
+    private RatingDto? _rating;
+    private int _ratingScore = 5;
+    private string _ratingComment = "";
+    private bool _ratingBusy;
+
+    // ── Time tracking state ──────────────────────────────────────────────
+    private List<TimeEntryDto> _timeEntries = [];
+    private bool _timerRunning = false;
+    private System.Threading.Timer? _uiTimer;
+    private TimeSpan _elapsed = TimeSpan.Zero;
+    private DateTime? _timerStartedAt;
+    private int _manualMinutes;
+    private string _timeNote = "";
+    private bool _timeBusy = false;
+
+    // ── Deadline / SLA state ──────────────────────────────────────────────
+    private DateTime? _dueDateEdit;
+    private bool _dueDateBusy = false;
+    private SlaStatus _slaStatus = new();
+    // public string? AppUserId => _currentUser?.AppUserId;
+
+
+    // ── Lifecycle ────────────────────────────────────────────────────────
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthService.IsAuthenticated) { Navigation.NavigateTo("/login"); return; }
+
+        // Load all data in parallel
+        await Task.WhenAll(
+            ApiService.GetTicketAsync(Id, AuthService.UserId, AuthService.AgentId).ContinueWith(t => _ticket = t.Result),
+            ApiService.GetCommentsAsync(Id).ContinueWith(t => _comments = t.Result),
+            ApiService.GetTimeEntriesAsync(Id).ContinueWith(t => _timeEntries = t.Result),
+            ApiService.GetTicketActivitiesAsync(Id).ContinueWith(t => _activities = t.Result),
+            ApiService.GetRatingAsync(Id).ContinueWith(t => _rating = t.Result),
+            AuthService.IsManager
+                ? ApiService.GetAgentsAsync().ContinueWith(t => _agents = t.Result)
+                : Task.CompletedTask
+        );
+
+        // Pre-select first available agent
+        if (_agents.Any(a => a.IsAvailable))
+            _agentId = _agents.First(a => a.IsAvailable).Id;
+
+        _dueDateEdit = _ticket?.DueDate;
+        RecalculateSla();
+
+        // Restore running timer if one exists (e.g. after page refresh)
+        var running = _timeEntries.FirstOrDefault(e => e.IsRunning);
+        if (running is not null)
+        {
+            _timerRunning = true;
+            _timerStartedAt = running.StartedAt;
+            _elapsed = DateTime.UtcNow - running.StartedAt;
+            StartUiTimer();
+        }
+
+        _loading = false;
+        StateHasChanged();
+    }
+
+    // ── Deadline / SLA actions ───────────────────────────────────────────
+
+    private void RecalculateSla()
+    {
+        if (_ticket is null) return;
+        _slaStatus = SlaStatus.Calculate(_ticket.DueDate, _ticket.ResolvedAt, _ticket.Status);
+    }
+
+    private async Task SaveDueDate()
+    {
+        _dueDateBusy = true;
+        var ok = await ApiService.SetDueDateAsync(Id, _dueDateEdit);
+        if (ok)
+        {
+            _ticket = await ApiService.GetTicketAsync(Id, AuthService.UserId, AuthService.AgentId);
+            RecalculateSla();
+            Snackbar.Add("Deadline updated.", Severity.Success);
+        }
+        else Snackbar.Add("Could not update deadline.", Severity.Error);
+        _dueDateBusy = false;
+    }
+
+    private static string SlaColor(string color) => color switch
+    {
+        "red" => "#f87171",
+        "orange" => "#fb923c",
+        "green" => "var(--resolved)",
+        _ => "var(--text-3)"
+    };
+
+    // ── Ticket actions ───────────────────────────────────────────────────
+
+    private async Task Assign()
+    {
+        _busy = true;
+        var ok = await ApiService.AssignTicketAsync(Id, _agentId);
+        if (ok) { _ticket = await ApiService.GetTicketAsync(Id, AuthService.UserId, AuthService.AgentId); Snackbar.Add("Assigned.", Severity.Success); }
+        else Snackbar.Add("Agent may not be available.", Severity.Error);
+        _busy = false;
+    }
+
+    private async Task Resolve()
+    {
+        _busy = true;
+        var ok = await ApiService.ResolveTicketAsync(Id);
+        if (ok) { _ticket = await ApiService.GetTicketAsync(Id, AuthService.UserId, AuthService.AgentId); Snackbar.Add("Resolved.", Severity.Success); }
+        else Snackbar.Add("Only in-progress tickets can be resolved.", Severity.Error);
+        _busy = false;
+    }
+
+    private async Task Close()
+    {
+        _busy = true;
+        var ok = await ApiService.CloseTicketAsync(Id);
+        if (ok) { _ticket = await ApiService.GetTicketAsync(Id, AuthService.UserId, AuthService.AgentId); Snackbar.Add("Closed.", Severity.Success); }
+        _busy = false;
+    }
+
+    private async Task Delete()
+    {
+        var ok = await ApiService.DeleteTicketAsync(Id);
+        if (ok) { Snackbar.Add("Deleted.", Severity.Success); Navigation.NavigateTo("/tickets"); }
+        else Snackbar.Add("Delete failed.", Severity.Error);
+    }
+
+    private async Task AddComment()
+    {
+        if (string.IsNullOrWhiteSpace(_commentBody) || !AuthService.UserId.HasValue) return;
+        _commentBusy = true;
+        var r = await ApiService.AddCommentAsync(Id, new CreateCommentDto
+        {
+            Body = _commentBody,
+            AuthorId = AuthService.UserId.Value
+        });
+        if (r is not null) { _comments.Add(r); _commentBody = ""; }
+        else Snackbar.Add("Failed to post.", Severity.Error);
+        _commentBusy = false;
+    }
+
+    // ── Rating actions ───────────────────────────────────────────────────
+
+    private async Task SubmitRating()
+    {
+        if (!AuthService.UserId.HasValue) return;
+        _ratingBusy = true;
+        var r = await ApiService.SubmitRatingAsync(Id, new SubmitRatingDto { Score = _ratingScore, Comment = _ratingComment });
+        if (r is not null) { _rating = r; Snackbar.Add("Thanks for your feedback!", Severity.Success); }
+        else Snackbar.Add("Could not submit rating.", Severity.Error);
+        _ratingBusy = false;
+    }
+
+    // ── Time tracking actions ────────────────────────────────────────────
+private async Task StartTimer()
+{
+    // var agentId = AuthService.AgentId ?? AuthService.UserId;
+    // if (!agentId.HasValue) return;
+
+    if (!AuthService.AgentId.HasValue)
+    {
+        Snackbar.Add("Only agents can track time.", Severity.Error);
+        return;
+    }
+
+    _timeBusy = true;
+    // var ok = await ApiService.StartTimerAsync(Id, agentId.Value);
+    var ok = await ApiService.StartTimerAsync(Id, AuthService.AgentId.Value);
+    if (ok)
+    {
+        _timerRunning = true;
+        _timerStartedAt = DateTime.UtcNow;
+        _elapsed = TimeSpan.Zero;
+        StartUiTimer();
+        Snackbar.Add("Timer started.", Severity.Success);
+    }
+    else Snackbar.Add("Could not start timer.", Severity.Error);
+    _timeBusy = false;
+}
+
+private async Task StopTimer()
+{
+    // var agentId = AuthService.AgentId ?? AuthService.UserId;
+    // if (!agentId.HasValue) return;
+
+    if (!AuthService.AgentId.HasValue)
+    {
+        Snackbar.Add("Only agents can track time.", Severity.Error);
+        return;
+    }
+
+    _timeBusy = true;
+    // var ok = await ApiService.StopTimerAsync(Id, agentId.Value);
+    var ok = await ApiService.StartTimerAsync(Id, AuthService.AgentId.Value);
+    if (ok)
+    {
+        _timerRunning = false;
+        _timerStartedAt = null;
+        _uiTimer?.Dispose();
+        _uiTimer = null;
+        _timeEntries = await ApiService.GetTimeEntriesAsync(Id);
+        Snackbar.Add("Timer stopped.", Severity.Success);
+    }
+    else Snackbar.Add("Could not stop timer.", Severity.Error);
+    _timeBusy = false;
+}
+
+private void StartUiTimer()
+{
+    _uiTimer = new System.Threading.Timer(_ =>
+    {
+        if (_timerStartedAt.HasValue)
+            _elapsed = DateTime.UtcNow - _timerStartedAt.Value;
+        InvokeAsync(StateHasChanged);
+    }, null, 0, 1000);
+}
+
+private async Task LogTime()
+{
+    var agentId = AuthService.AgentId ?? AuthService.UserId;
+    if (!agentId.HasValue || _manualMinutes <= 0) return;
+    _timeBusy = true;
+    var ok = await ApiService.LogTimeAsync(Id, agentId.Value, _manualMinutes, _timeNote);
+    if (ok)
+    {
+        _timeEntries = await ApiService.GetTimeEntriesAsync(Id);
+        _manualMinutes = 0;
+        _timeNote = "";
+        Snackbar.Add("Time logged.", Severity.Success);
+    }
+    else Snackbar.Add("Could not log time.", Severity.Error);
+    _timeBusy = false;
+}
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    // Formats TimeSpan as HH:MM:SS for the live timer display
+    private static string FormatTime(TimeSpan t)
+        => $"{(int)t.TotalHours:D2}:{t.Minutes:D2}:{t.Seconds:D2}";
+
+    // Sum of all completed time entries in minutes
+    private int TotalLoggedMinutes => _timeEntries.Sum(e => e.TotalMinutes);
+
+    private static string StatusBadge(string s) => s switch
+    {
+        "Open" => "badge badge-open",
+        "InProgress" => "badge badge-inprogress",
+        "Resolved" => "badge badge-resolved",
+        "Closed" => "badge badge-closed",
+        _ => "badge"
+    };
+
+    private static string RatingLabel(int score) => score switch
+    {
+        1 => "Poor",
+        2 => "Fair",
+        3 => "Good",
+        4 => "Very Good",
+        5 => "Excellent",
+        _ => "—"
+    };
+
+    private static string PriorityClass(string p) => p switch
+    {
+        "Low" => "p-low",
+        "Medium" => "p-medium",
+        "High" => "p-high",
+        "Urgent" => "p-urgent",
+        _ => ""
+    };
+
+    // Dispose the background timer when the component is destroyed
+    // to prevent memory leaks and orphaned background threads
+    public void Dispose()
+    {
+        _uiTimer?.Dispose();
+        _uiTimer = null;
+    }
+}

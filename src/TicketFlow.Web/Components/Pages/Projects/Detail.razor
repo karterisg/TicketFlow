@@ -1,0 +1,239 @@
+@page "/projects/{Id:int}"
+@using MudBlazor
+@using TicketFlow.Shared.DTOs
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>Project — Desk</PageTitle>
+
+<div style="margin-bottom:20px;">
+    <a href="/projects" class="btn btn-ghost btn-sm">← Back</a>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+}
+else if (_project is null)
+{
+    <div class="empty-state"><p>Project not found.</p></div>
+}
+else
+{
+    <div class="page-header" style="margin-bottom:20px;">
+        <div><h1>@_project.IconKey &nbsp;@_project.Name</h1><p>@(_project.Description ?? "No description")</p></div>
+        <span class="badge @(_project.Status == "Archived" ? "badge-closed" : "badge-open")">@_project.Status</span>
+    </div>
+
+    <div class="detail-grid">
+        <div>
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header"><h3>Settings</h3></div>
+                <div class="card-body" style="display:flex; flex-direction:column; gap:12px;">
+                    <MudSwitch @bind-Value="_allowCustomerTicketCreation" Color="Color.Primary" Label="Allow customers to create tickets" Disabled="@(!_canManage)" />
+                    <MudSwitch @bind-Value="_requireApprovalForClose" Color="Color.Primary" Label="Require approval before closing tickets" Disabled="@(!_canManage)" />
+                    <div class="field">
+                        <label>Notification email</label>
+                        <input class="input" type="email" @bind="_notificationEmail" placeholder="Optional" disabled="@(!_canManage)" />
+                    </div>
+                    @if (_canManage)
+                    {
+                        <button class="btn btn-primary btn-sm" style="align-self:flex-start;" @onclick="SaveSettings" disabled="@_busy">Save settings</button>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <aside>
+            <div class="card">
+                <div class="card-header">
+                    <h3>Members <span class="text-3 mono" style="font-weight:400;">(@_members.Count)</span></h3>
+                </div>
+                <div class="card-body" style="display:flex; flex-direction:column; gap:10px;">
+                    @foreach (var m in _members)
+                    {
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                            <div>
+                                <div style="font-size:13px;">@m.MemberName</div>
+                                <div class="text-3" style="font-size:11px;">@m.Role</div>
+                            </div>
+                            @if (_canManage)
+                            {
+                                <div style="display:flex; gap:6px;">
+                                    <select class="input" style="width:auto; font-size:12px;" @onchange="e => ChangeRole(m, e.Value?.ToString())">
+                                        @foreach (var r in new[] { "Viewer", "Member", "Owner" })
+                                        {
+                                            <option value="@r" selected="@(m.Role == r)">@r</option>
+                                        }
+                                    </select>
+                                    <button class="btn btn-danger btn-sm" @onclick="() => RemoveMember(m)">✕</button>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    @if (_canManage)
+                    {
+                        <hr class="divider" />
+
+                        <div class="field" style="margin-bottom:0;">
+                            <label>Add user</label>
+                            <select class="input" @bind="_addUserId">
+                                <option value="0">— select —</option>
+                                @foreach (var u in _users.Where(u => !_members.Any(m => m.UserId == u.Id)))
+                                {
+                                    <option value="@u.Id">@u.FullName</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="field" style="margin-bottom:0;">
+                            <label>Role</label>
+                            <select class="input" @bind="_addRole">
+                                <option value="Viewer">Viewer</option>
+                                <option value="Member">Member</option>
+                                <option value="Owner">Owner</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-ghost btn-sm" @onclick="AddMember" disabled="@(_addUserId == 0)">+ Add member</button>
+
+                        @if (_hasPendingChanges)
+                        {
+                            <button class="btn btn-primary btn-sm" @onclick="SaveMembers">Save</button>
+                        }
+                    }
+                </div>
+            </div>
+        </aside>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private ProjectDto? _project;
+    private List<ProjectMemberDto> _members = [];
+    private List<UserDto> _users = [];
+    private bool _loading = true, _busy;
+
+    private bool _allowCustomerTicketCreation, _requireApprovalForClose;
+    private string? _notificationEmail;
+
+    private int _addUserId;
+    private string _addRole = "Member";
+    private bool _canManage;
+
+    private readonly List<(int MemberId, string NewRole)> _pendingRoleChanges = [];
+    private readonly List<int> _pendingRemovals = [];
+    private readonly List<AddProjectMemberDto> _pendingAdds = [];
+    private bool _hasPendingChanges => _pendingRoleChanges.Count > 0 || _pendingRemovals.Count > 0 || _pendingAdds.Count > 0;
+
+    private bool IsMyMembership(ProjectMemberDto m) =>
+        AuthService.IsAgent ? m.AgentId == AuthService.AgentId : AuthService.UserId is not null && m.UserId == AuthService.UserId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthService.IsAuthenticated) { Navigation.NavigateTo("/"); return; }
+
+        _project = await ApiService.GetProjectAsync(Id);
+        if (_project is not null)
+        {
+            _allowCustomerTicketCreation = _project.AllowCustomerTicketCreation;
+            _requireApprovalForClose = _project.RequireApprovalForClose;
+            _notificationEmail = _project.NotificationEmail;
+
+            _members = await ApiService.GetProjectMembersAsync(Id);
+            _users = await ApiService.GetUsersAsync();
+
+            _canManage = AuthService.IsManager
+                || _members.Any(m => IsMyMembership(m) && m.Role == "Owner");
+
+            if (!AuthService.IsManager && !_members.Any(IsMyMembership))
+            {
+                Navigation.NavigateTo("/");
+                return;
+            }
+        }
+
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task SaveSettings()
+    {
+        if (AuthService.UserId is null) return;
+        _busy = true;
+        var ok = await ApiService.UpdateProjectSettingsAsync(Id, AuthService.UserId.Value, new UpdateProjectSettingsDto
+        {
+            AllowCustomerTicketCreation = _allowCustomerTicketCreation,
+            RequireApprovalForClose = _requireApprovalForClose,
+            NotificationEmail = _notificationEmail
+        });
+        _busy = false;
+        Snackbar.Add(ok ? "Settings saved." : "Failed to save settings.", ok ? Severity.Success : Severity.Error);
+    }
+
+    private void AddMember()
+    {
+        if (_addUserId == 0) return;
+        _pendingAdds.Add(new AddProjectMemberDto { UserId = _addUserId, Role = _addRole });
+
+        var user = _users.First(u => u.Id == _addUserId);
+        _members.Add(new ProjectMemberDto { Id = 0, ProjectId = Id, UserId = _addUserId, MemberName = user.FullName, Role = _addRole });
+        _addUserId = 0;
+    }
+
+    private void ChangeRole(ProjectMemberDto m, string? role)
+    {
+        if (string.IsNullOrWhiteSpace(role) || role == m.Role) return;
+        m.Role = role;
+
+        if (m.Id != 0)
+        {
+            _pendingRoleChanges.RemoveAll(c => c.MemberId == m.Id);
+            _pendingRoleChanges.Add((m.Id, role));
+        }
+    }
+
+    private void RemoveMember(ProjectMemberDto m)
+    {
+        _members.Remove(m);
+        if (m.Id != 0)
+        {
+            _pendingRoleChanges.RemoveAll(c => c.MemberId == m.Id);
+            _pendingRemovals.Add(m.Id);
+        }
+        else
+        {
+            _pendingAdds.RemoveAll(a => a.UserId == m.UserId && a.Role == m.Role);
+        }
+    }
+
+    private async Task SaveMembers()
+    {
+        if (AuthService.UserId is null || !_hasPendingChanges) return;
+
+        var actingUserId = AuthService.UserId.Value;
+        var ok = true;
+
+        foreach (var memberId in _pendingRemovals)
+            ok &= await ApiService.RemoveProjectMemberAsync(Id, memberId, actingUserId);
+
+        foreach (var (memberId, newRole) in _pendingRoleChanges)
+            ok &= await ApiService.ChangeProjectMemberRoleAsync(Id, memberId, actingUserId, newRole);
+
+        foreach (var add in _pendingAdds)
+            ok &= await ApiService.AddProjectMemberAsync(Id, actingUserId, add);
+
+        _pendingRemovals.Clear();
+        _pendingRoleChanges.Clear();
+        _pendingAdds.Clear();
+
+        _members = await ApiService.GetProjectMembersAsync(Id);
+
+        Snackbar.Add(ok ? "Members saved." : "Some changes failed to save.", ok ? Severity.Success : Severity.Warning);
+    }
+}

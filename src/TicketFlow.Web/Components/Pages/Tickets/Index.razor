@@ -1,0 +1,193 @@
+@page "/tickets"
+@using MudBlazor
+@using TicketFlow.Shared.DTOs
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Tickets - Desk</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Tickets</h1>
+        <p>@_totalCount total</p>
+    </div>
+    <div style="display:flex; gap:8px;">
+        @if (AuthService.IsManager)
+        {
+            <button class="btn btn-secondary" @onclick="ExportToExcel" disabled="@_exporting">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                @(_exporting ? "Exporting…" : "Export to Excel")
+            </button>
+        }
+        @if (AuthService.IsManager || AuthService.IsAgent)
+        {
+            <a href="/tickets/create" class="btn btn-primary">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                New ticket
+            </a>
+        }
+    </div>
+</div>
+
+<div class="filter-bar">
+    <input class="search-input" type="text" placeholder="Search tickets…"
+           value="@_search" @oninput="OnSearchInput" />
+    @foreach (var s in _statusFilters)
+    {
+        <button class="filter-pill @ActivePillClass(s.Key, s.Value)" @onclick="() => Toggle(s.Key)">
+            @s.Key
+        </button>
+    }
+</div>
+
+<div class="card" style="overflow:hidden;">
+    <MudDataGrid @ref="_grid" T="TicketDto" ServerData="ServerReload" Loading="_loading"
+                 RowClick="@((DataGridRowClickEventArgs<TicketDto> e) => GoToTicket(e.Item.Id))"
+                 Hover="true" Dense="true" RowsPerPage="15" Height="calc(79vh - 260px)" FixedHeader="true">
+        <Columns>
+            <PropertyColumn Property="x => x.Id" Title="ID">
+                <CellTemplate>
+                    <span class="ticket-id">#@context.Item.Id</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.Title" Title="Title">
+                <CellTemplate>
+                    <div class="ticket-title-block">
+                        <span class="ticket-title">@context.Item.Title</span>
+                        <span class="ticket-from">@context.Item.UserName · @(context.Item.AgentName ?? "unassigned")</span>
+                    </div>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.Status" Title="Status">
+                <CellTemplate>
+                    <span class="@StatusBadge(context.Item.Status)">@context.Item.Status</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.Priority" Title="Priority">
+                <CellTemplate>
+                    <span class="priority-mark @PriorityClass(context.Item.Priority)">@context.Item.Priority</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.CategoryName" Title="Category">
+                <CellTemplate>
+                    <span class="text-2" style="font-size:12.5px;">@context.Item.CategoryName</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.CreatedAt" Title="Date">
+                <CellTemplate>
+                    <span class="ticket-date">@context.Item.CreatedAt.ToString("MMM d, yyyy")</span>
+                </CellTemplate>
+            </PropertyColumn>
+        </Columns>
+        <NoRecordsContent>
+            <div class="empty-state">
+                <p>No tickets match your filters.</p>
+            </div>
+        </NoRecordsContent>
+        <PagerContent>
+            <MudDataGridPager T="TicketDto" />
+        </PagerContent>
+    </MudDataGrid>
+</div>
+
+@code {
+    private MudDataGrid<TicketDto> _grid = default!;
+    private bool _loading = true;
+    private string _search = "";
+    private int _totalCount;
+    private CancellationTokenSource? _debounceCts;
+
+    private Dictionary<string, bool> _statusFilters = new()
+    {
+        ["Open"] = false, ["InProgress"] = false, ["Resolved"] = false, ["Closed"] = false
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthService.IsAuthenticated) { Navigation.NavigateTo("/login"); return; }
+        await _grid.ReloadServerData();
+    }
+
+    private async Task<GridData<TicketDto>> ServerReload(GridState<TicketDto> state)
+    {
+        var statuses = _statusFilters.Where(x => x.Value).Select(x => x.Key).ToList();
+        var result = await ApiService.GetTicketsPagedAsync(
+            state.Page + 1, state.PageSize, _search, statuses, AuthService.UserId, AuthService.AgentId);
+
+        _loading = false;
+        _totalCount = result?.TotalCount ?? 0;
+
+        return new GridData<TicketDto>
+        {
+            TotalItems = result?.TotalCount ?? 0,
+            Items = result?.Items ?? []
+        };
+    }
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        _search = e.Value?.ToString() ?? "";
+
+        _debounceCts?.Cancel();
+        _debounceCts = new CancellationTokenSource();
+        var token = _debounceCts.Token;
+
+        _ = DebounceReload(token);
+    }
+
+    private async Task DebounceReload(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(400, token);
+            if (token.IsCancellationRequested) return;
+            _grid.NavigateTo(Page.First);
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    private void Toggle(string key)
+    {
+        _statusFilters[key] = !_statusFilters[key];
+        _grid.NavigateTo(Page.First);
+    }
+
+    private void GoToTicket(int id) => Navigation.NavigateTo($"/tickets/{id}");
+
+    private bool _exporting;
+
+    private async Task ExportToExcel()
+    {
+        _exporting = true;
+        try
+        {
+            var bytes = await ApiService.ExportTicketsToExcelAsync();
+            if (bytes is null) return;
+            var base64 = Convert.ToBase64String(bytes);
+            var fileName = $"tickets-{DateTime.UtcNow:yyyyMMdd-HHmmss}.xlsx";
+            await JS.InvokeVoidAsync("fileDownload.save", fileName,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64);
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private string ActivePillClass(string key, bool on) => on ? $"active-{key.ToLower()}" : "";
+
+    private static string StatusBadge(string s) => s switch
+    {
+        "Open" => "badge badge-open", "InProgress" => "badge badge-inprogress",
+        "Resolved" => "badge badge-resolved", "Closed" => "badge badge-closed", _ => "badge"
+    };
+
+    private static string PriorityClass(string p) => p switch
+    {
+        "Low" => "p-low", "Medium" => "p-medium", "High" => "p-high", "Urgent" => "p-urgent", _ => ""
+    };
+}

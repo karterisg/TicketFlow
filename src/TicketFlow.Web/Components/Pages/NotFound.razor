@@ -1,0 +1,18 @@
+﻿@page "/not-found"
+@using MudBlazor
+@layout Layout.MainLayout
+
+<PageTitle>Not Found Desk</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Style="text-align:center; margin-top:80px;">
+    <MudText Style="font-size:6rem; font-weight:700; color:#2d2d44; line-height:1;">404</MudText>
+    <MudText Typo="Typo.h5" Style="color:#e0e0f0; font-weight:600;" Class="mb-2">Page not found</MudText>
+    <MudText Typo="Typo.body1" Style="color:#6b6b8a;" Class="mb-6">
+        The page you're looking for doesn't exist or has been moved.
+    </MudText>
+    <MudButton Href="/" Variant="Variant.Filled"
+               Style="background:#7c6af7; color:white; border-radius:8px;">
+        Go to Dashboard
+    </MudButton>
+</MudContainer>
+

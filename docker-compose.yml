@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ticketflow_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (copy .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-ticketflow_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - sqldata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ticketflow_user} -d ${POSTGRES_DB:-ticketflow_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: src/TicketFlow.API/Dockerfile
+    ports:
+      - "7216:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=db;Port=5432;Database=${POSTGRES_DB:-ticketflow_dev};Username=${POSTGRES_USER:-ticketflow_user};Password=${POSTGRES_PASSWORD}
+      - ConnectionStrings__Redis=redis:6379
+      - JwtSettings__SecretKey=${JWT_SECRET_KEY:?set JWT_SECRET_KEY in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  web:
+    build:
+      context: .
+      dockerfile: src/TicketFlow.Web/Dockerfile
+    ports:
+      - "7075:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ApiBaseUrl=http://api:8080
+    depends_on:
+      - api
+
+volumes:
+  sqldata:

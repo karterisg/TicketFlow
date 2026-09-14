@@ -1,0 +1,73 @@
+@page "/reports"
+@using MudBlazor
+@using TicketFlow.Shared.DTOs
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NavigationManager Navigation
+
+<PageTitle>Reports - Desk</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Reports</h1>
+        <p>@(_stats?.Total ?? 0) tickets @(AuthService.IsAgent ? "assigned to you" : "in total")</p>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+}
+else if (_stats is null || _stats.Total == 0)
+{
+    <div class="card">
+        <div class="empty-state">
+            <p>No ticket data to report on yet.</p>
+        </div>
+    </div>
+}
+else
+{
+    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+        <div class="card" style="flex:1; min-width:320px; padding:16px;">
+            <h3>Tickets by status</h3>
+            <MudChart ChartType="ChartType.Donut" InputData="@_statusData" InputLabels="@_statusLabels" Width="100%" Height="280px" />
+        </div>
+        <div class="card" style="flex:1; min-width:320px; padding:16px;">
+            <h3>Tickets by priority</h3>
+            <MudChart ChartType="ChartType.Bar" ChartSeries="@_prioritySeries" XAxisLabels="@_priorityLabels" Width="100%" Height="280px" />
+        </div>
+    </div>
+}
+
+@code {
+    private TicketStatsDto? _stats;
+    private bool _loading = true;
+
+    private double[] _statusData = [];
+    private string[] _statusLabels = [];
+
+    private string[] _priorityLabels = [];
+    private List<ChartSeries> _prioritySeries = [];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthService.IsAuthenticated) { Navigation.NavigateTo("/login"); return; }
+        if (AuthService.IsCustomer && !AuthService.HasPermission("Reports.View")) { Navigation.NavigateTo("/"); return; }
+
+        _stats = await ApiService.GetTicketStatsAsync(AuthService.IsAgent ? AuthService.AgentId : null);
+        if (_stats is not null)
+        {
+            _statusLabels = _stats.ByStatus.Keys.ToArray();
+            _statusData = _stats.ByStatus.Values.Select(v => (double)v).ToArray();
+
+            _priorityLabels = _stats.ByPriority.Keys.ToArray();
+            _prioritySeries = [new ChartSeries { Name = "Tickets", Data = _stats.ByPriority.Values.Select(v => (double)v).ToArray() }];
+        }
+
+        _loading = false;
+        StateHasChanged();
+    }
+}

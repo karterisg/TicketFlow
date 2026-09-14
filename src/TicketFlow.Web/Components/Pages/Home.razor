@@ -1,0 +1,129 @@
+﻿@page "/"
+@using MudBlazor
+@using TicketFlow.Shared.DTOs
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NavigationManager Navigation
+
+<PageTitle>Desk</PageTitle>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Style="position:fixed;top:0;left:0;right:0;" />
+}
+else
+{
+    <div class="page-header">
+        <div>
+            <h1>Desk</h1>
+            <p>@DateTime.Now.ToString("dddd, MMMM d")</p>
+        </div>
+        @if (AuthService.IsManager || AuthService.IsAgent)
+        {
+            <a href="/tickets/create" class="btn btn-primary">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                New ticket
+            </a>
+        }
+    </div>
+
+    <div class="stats-row">
+        <div class="stat">
+            <div class="stat-label">Total</div>
+            <div class="stat-value" style="color:var(--text)">@_tickets.Count</div>
+            <div class="stat-desc">all tickets</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Open</div>
+            <div class="stat-value" style="color:var(--open)">@_tickets.Count(t => t.Status == "Open")</div>
+            <div class="stat-desc">awaiting assignment</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">In progress</div>
+            <div class="stat-value" style="color:var(--inprogress)">@_tickets.Count(t => t.Status == "InProgress")</div>
+            <div class="stat-desc">being worked on</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Resolved</div>
+            <div class="stat-value" style="color:var(--resolved)">@_tickets.Count(t => t.Status == "Resolved")</div>
+            <div class="stat-desc">completed</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Recent tickets</h3>
+            <a href="/tickets" class="btn btn-ghost btn-sm">View all-></a>
+        </div>
+        @if (_tickets.Any())
+        {
+            <div class="ticket-list" style="border:none; border-radius:0;">
+                <div class="ticket-list-header">
+                    <span>ID</span>
+                    <span>Title</span>
+                    <span>Status</span>
+                    <span>Priority</span>
+                    <span>Category</span>
+                    <span style="text-align:right">Created</span>
+                </div>
+                @foreach (var t in _tickets.OrderByDescending(x => x.CreatedAt).Take(8))
+                {
+                    <div class="ticket-row" @onclick="() => GoToTicket(t.Id)">
+                        <span class="ticket-id">#@t.Id</span>
+                        <div class="ticket-title-block">
+                            <span class="ticket-title">@t.Title</span>
+                            <span class="ticket-from">@t.UserName</span>
+                        </div>
+                        <span class="@StatusBadge(t.Status)">@t.Status</span>
+                        <span class="priority-mark @PriorityClass(t.Priority)">@t.Priority</span>
+                        <span class="text-2" style="font-size:12.5px;">@t.CategoryName</span>
+                        <span class="ticket-date">@t.CreatedAt.ToString("MMM d")</span>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="empty-state"><p>No tickets yet.</p></div>
+        }
+    </div>
+}
+
+@code {
+    private List<TicketDto> _tickets = [];
+    private bool _loading = true;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthService.IsAuthenticated) { Navigation.NavigateTo("/login"); return; }
+        _tickets = await ApiService.GetTicketsAsync(AuthService.UserId, AuthService.AgentId);
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private void GoToTicket(int id) => Navigation.NavigateTo($"/tickets/{id}");
+
+    private static string StatusBadge(string s) => s switch
+    {
+        "Open"       => "badge badge-open",
+        "InProgress" => "badge badge-inprogress",
+        "Resolved"   => "badge badge-resolved",
+        "Closed"     => "badge badge-closed",
+        _ => "badge"
+    };
+
+    private static string PriorityClass(string p) => p switch
+    {
+        "Low"    => "p-low",
+        "Medium" => "p-medium",
+        "High"   => "p-high",
+        "Urgent" => "p-urgent",
+        _ => ""
+    };
+}
+
+

@@ -1,0 +1,233 @@
+@page "/users"
+@using MudBlazor
+@using TicketFlow.Shared.DTOs
+@using TicketFlow.Web.Services
+@inject AuthService AuthService
+@inject ApiService ApiService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>Users | Desk</PageTitle>
+
+<div class="page-header">
+    <div><h1>Users</h1><p>@_totalCount customer profiles</p></div>
+    <button class="btn btn-primary" @onclick="() => _showAdd = true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+        Add user
+    </button>
+</div>
+
+<div class="filter-bar">
+    <input class="search-input" type="text" placeholder="Search users…"
+           value="@_search" @oninput="OnSearchInput" />
+</div>
+
+<div class="card" style="overflow:hidden;">
+    <MudDataGrid @ref="_grid" T="UserDto" ServerData="ServerReload" Loading="_loading"
+                 Hover="true" Dense="true" RowsPerPage="15" Height="calc(79vh - 260px)" FixedHeader="true">
+        <Columns>
+            <PropertyColumn Property="x => x.FullName" Title="Name">
+                <CellTemplate>
+                    <span style="font-weight:500;">@context.Item.FullName</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.Email" Title="Email">
+                <CellTemplate>
+                    <span class="text-2">@context.Item.Email</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.TicketCount" Title="Tickets">
+                <CellTemplate>
+                    <span class="mono text-2">@context.Item.TicketCount</span>
+                </CellTemplate>
+            </PropertyColumn>
+            <PropertyColumn Property="x => x.Id" Title="">
+                <CellTemplate>
+                    <div style="text-align:right;">
+                        @if (context.Item.Role == "Customer")
+                        {
+                            <button class="btn btn-ghost" style="font-size:0.78rem; padding:4px 10px;"
+                                    @onclick="() => OpenPromote(context.Item)">
+                                Promote
+                            </button>
+                        }
+                        <button class="btn btn-danger btn-sm" @onclick="() => Delete(context.Item)">Remove</button>
+                    </div>
+                </CellTemplate>
+            </PropertyColumn>
+        </Columns>
+        <NoRecordsContent>
+            <div class="empty-state">
+                <p>No users match your search.</p>
+            </div>
+        </NoRecordsContent>
+        <PagerContent>
+            <MudDataGridPager T="UserDto" />
+        </PagerContent>
+    </MudDataGrid>
+</div>
+
+@if (_showAdd)
+{
+    <div class="dialog-overlay" @onclick="() => _showAdd = false">
+        <div class="dialog-box" @onclick:stopPropagation="true">
+            <div class="dialog-title">Add user</div>
+            <div class="field">
+                <label>Full name</label>
+                <input class="input" type="text" @bind="_newName" placeholder="GiorgosK" />
+            </div>
+            <div class="field">
+                <label>Email</label>
+                <input class="input" type="email" @bind="_newEmail" placeholder="Giorgos@example.com" />
+            </div>
+            <div class="field">
+                <label>Password</label>
+                <input class="input" type="password" @bind="_newPassword" placeholder="Temporary password" />
+            </div>
+            <div class="dialog-actions">
+                <button class="btn btn-ghost" @onclick="() => _showAdd = false">Cancel</button>
+                <button class="btn btn-primary" @onclick="Add" disabled="@_busy">Add user</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_promoteUser is not null)
+{
+    <div class="dialog-overlay" @onclick="ClosePromote">
+        <div class="dialog-box" @onclick:stopPropagation="true">
+            <div class="dialog-title">Promote user</div>
+            <p style="margin:0 0 16px; color:var(--text-2); font-size:0.9rem;">
+                Select the new role for <strong>@_promoteUser.FullName</strong>:
+            </p>
+            <div style="display:flex; gap:10px; margin-bottom:20px;">
+                <button class="btn @(_selectedRole == "Customer" ? "btn-primary" : "btn-ghost")"
+                        style="flex:1;" @onclick='() => _selectedRole = "Customer"'>
+                    Customer
+                </button>
+                <button class="btn @(_selectedRole == "Agent" ? "btn-primary" : "btn-ghost")"
+                        style="flex:1;" @onclick='() => _selectedRole = "Agent"'>
+                    Agent
+                </button>
+            </div>
+            @if (_selectedRole == "Agent" && _promoteUser.TicketCount > 0)
+            {
+                <p style="color:#e57373; font-size:0.82rem; margin:0 0 12px;">
+                    This user has @_promoteUser.TicketCount open ticket(s). Promotion to Agent is not allowed while tickets exist.
+                </p>
+            }
+            <div class="dialog-actions">
+                <button class="btn btn-ghost" @onclick="ClosePromote">Cancel</button>
+                <button class="btn btn-primary" @onclick="ConfirmPromote" disabled="@(_busy || _selectedRole == "Customer" || (_selectedRole == "Agent" && _promoteUser.TicketCount > 0))">
+                    Confirm
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private MudDataGrid<UserDto> _grid = default!;
+    private bool _loading = true, _showAdd, _busy;
+    private string _newName = string.Empty, _newEmail = string.Empty, _newPassword = string.Empty;
+    private string _search = "";
+    private int _totalCount;
+    private CancellationTokenSource? _debounceCts;
+
+    private UserDto? _promoteUser;
+    private string _selectedRole = "Customer";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!AuthService.IsAuthenticated || !(AuthService.IsManager || AuthService.HasPermission("Users.Manage"))) { Navigation.NavigateTo("/"); return; }
+        await _grid.ReloadServerData();
+    }
+
+    private async Task<GridData<UserDto>> ServerReload(GridState<UserDto> state)
+    {
+        var result = await ApiService.GetUsersPagedAsync(state.Page + 1, state.PageSize, _search);
+        _loading = false;
+        _totalCount = result?.TotalCount ?? 0;
+        return new GridData<UserDto> { TotalItems = result?.TotalCount ?? 0, Items = result?.Items ?? [] };
+    }
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        _search = e.Value?.ToString() ?? "";
+
+        _debounceCts?.Cancel();
+        _debounceCts = new CancellationTokenSource();
+        var token = _debounceCts.Token;
+        _ = DebounceReload(token);
+    }
+
+    private async Task DebounceReload(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(400, token);
+            if (token.IsCancellationRequested) return;
+            _grid.NavigateTo(Page.First);
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    private async Task Add()
+    {
+        if (string.IsNullOrWhiteSpace(_newName) || string.IsNullOrWhiteSpace(_newEmail) || string.IsNullOrWhiteSpace(_newPassword)) return;
+        _busy = true;
+        var r = await ApiService.CreateUserAsync(_newName, _newEmail, _newPassword);
+        _busy = false;
+        if (r is not null)
+        {
+            _showAdd = false;
+            _newName = string.Empty;
+            _newEmail = string.Empty;
+            _newPassword = string.Empty;
+            Snackbar.Add("User added.", Severity.Success);
+            await _grid.ReloadServerData();
+        }
+        else
+        {
+            Snackbar.Add("Failed - email may already exist.", Severity.Error);
+        }
+    }
+
+    private void OpenPromote(UserDto u)
+    {
+        _promoteUser = u;
+        _selectedRole = "Customer";
+    }
+
+    private void ClosePromote()
+    {
+        _promoteUser = null;
+        _selectedRole = "Customer";
+    }
+
+    private async Task ConfirmPromote()
+    {
+        if (_promoteUser is null || _selectedRole != "Agent") return;
+        _busy = true;
+        var result = await ApiService.PromoteUserToAgentAsync(_promoteUser.Id);
+        _busy = false;
+        if (result is not null)
+        {
+            Snackbar.Add($"{_promoteUser.FullName} promoted to Agent.", Severity.Success);
+            ClosePromote();
+            await _grid.ReloadServerData();
+        }
+        else
+        {
+            Snackbar.Add("Promotion failed - email may already exist as an agent.", Severity.Error);
+        }
+    }
+
+    private async Task Delete(UserDto u)
+    {
+        var ok = await ApiService.DeleteUsersAsync(u.Id);
+        if (ok) { Snackbar.Add("Removed.", Severity.Success); await _grid.ReloadServerData(); }
+        else Snackbar.Add("Cannot remove - user has tickets.", Severity.Error);
+    }
+}
